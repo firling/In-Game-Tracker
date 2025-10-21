@@ -1,0 +1,34 @@
+{
+  "name": "in-game-tracker",
+  "version": "1.0.0",
+  "description": "Discord bot to track League of Legends games",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "watch": "tsc -w"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "league-of-legends",
+    "tracker"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/sql.js": "^1.4.9",
+    "axios": "^1.6.7",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
