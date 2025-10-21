@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  bot:
+    build: .
+    container_name: in-game-tracker
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist database
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+    # Optional: resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
