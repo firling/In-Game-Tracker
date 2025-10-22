@@ -16,8 +16,10 @@ class DatabaseManager {
     if (existsSync(this.dbPath)) {
       const buffer = readFileSync(this.dbPath);
       this.db = new SQL.Database(buffer);
+      console.log('📂 Existing database loaded');
     } else {
       this.db = new SQL.Database();
+      console.log('📝 New database created');
     }
 
     // Create tables
@@ -58,8 +60,36 @@ class DatabaseManager {
       );
     `);
 
+    // Run migrations
+    await this.runMigrations();
+
     this.save();
     this.isInitialized = true;
+  }
+
+  private async runMigrations() {
+    if (!this.db) return;
+
+    console.log('🔄 Checking for database migrations...');
+
+    try {
+      // Migration 1: Add lp_before column to tracked_games if it doesn't exist
+      const result = this.db.exec("PRAGMA table_info(tracked_games)");
+      if (result.length > 0) {
+        const columns = result[0].values.map(row => row[1]); // column names are in index 1
+        
+        if (!columns.includes('lp_before')) {
+          console.log('➕ Adding lp_before column to tracked_games...');
+          this.db.exec('ALTER TABLE tracked_games ADD COLUMN lp_before INTEGER');
+          this.save();
+          console.log('✅ Migration completed: lp_before column added');
+        } else {
+          console.log('✅ Database schema is up to date');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Migration error:', error);
+    }
   }
 
   private save() {
