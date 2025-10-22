@@ -99,6 +99,10 @@ class RiotApiService {
       if (error.response?.status === 404) {
         return null; // Player not in game
       }
+      if (error.response?.status === 503) {
+        // Service temporarily unavailable, don't log as error
+        return null;
+      }
       console.error(`Error fetching active game for PUUID ${puuid}:`, error.response?.data || error.message);
       return null;
     }

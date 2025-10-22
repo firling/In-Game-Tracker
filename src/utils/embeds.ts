@@ -1,5 +1,6 @@
 import { EmbedBuilder } from 'discord.js';
 import { Participant, LeagueEntry } from '../types';
+import { championData } from '../services/championData';
 
 export function createGameStartEmbed(
   gameName: string,
@@ -14,7 +15,7 @@ export function createGameStartEmbed(
     .setDescription(`<@${discordUserId}> (${gameName}#${tagLine}) has started a game!`)
     .addFields(
       { name: '🎯 Queue', value: queueName, inline: true },
-      { name: '⚔️ Champion', value: getChampionName(championId), inline: true }
+      { name: '⚔️ Champion', value: championData.getChampionName(championId), inline: true }
     )
     .setTimestamp()
     .setFooter({ text: 'Good luck!' });
@@ -29,7 +30,8 @@ export function createGameEndEmbed(
   gameDuration: number,
   queueName: string,
   leagueEntry: LeagueEntry | undefined,
-  discordUserId: string
+  discordUserId: string,
+  previousLP?: number
 ): EmbedBuilder {
   const won = participant.win;
   const kda = `${participant.kills}/${participant.deaths}/${participant.assists}`;
@@ -58,8 +60,17 @@ export function createGameEndEmbed(
     .setTimestamp();
 
   if (leagueEntry) {
-    const lpChange = won ? '+' : '-';
-    const rankInfo = `${leagueEntry.tier} ${leagueEntry.rank} - ${leagueEntry.leaguePoints} LP`;
+    const currentLP = leagueEntry.leaguePoints;
+    let rankInfo = `${leagueEntry.tier} ${leagueEntry.rank} - ${currentLP} LP`;
+    
+    // Calculate LP change if we have previous LP
+    if (previousLP !== undefined) {
+      const lpChange = currentLP - previousLP;
+      const lpChangeStr = lpChange > 0 ? `+${lpChange}` : `${lpChange}`;
+      const lpEmoji = lpChange > 0 ? '📈' : '📉';
+      rankInfo += `\n${lpEmoji} ${lpChangeStr} LP`;
+    }
+    
     embed.addFields(
       { name: '🏆 Rank', value: rankInfo, inline: false }
     );
@@ -116,9 +127,4 @@ export function createDailyRecapEmbed(
   }
 
   return embed;
-}
-
-function getChampionName(championId: number): string {
-  // Simplified - in a real app, you'd want to fetch this from Data Dragon
-  return `Champion ${championId}`;
 }

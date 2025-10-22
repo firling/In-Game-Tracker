@@ -47,12 +47,12 @@ class GameTracker {
       const activeGame = await this.riotApi.getActiveGame(puuid);
       
       if (activeGame && this.riotApi.isRankedQueue(activeGame.gameQueueConfigId)) {
-        const gameId = `${activeGame.gameId}`;
+        const gameId = `${activeGame.platformId}_${activeGame.gameId}`;
         
         // Check if this is a new game
         if (!this.activeGames.has(accountId) || this.activeGames.get(accountId) !== gameId) {
           this.activeGames.set(accountId, gameId);
-          await this.notifyGameStart(accountId, gameName, tagLine, activeGame, discordUserId);
+          await this.notifyGameStart(accountId, gameName, tagLine, activeGame, discordUserId, puuid);
         }
       } else {
         // Player not in game, check if they just finished a game
@@ -70,7 +70,7 @@ class GameTracker {
     }
   }
 
-  private async notifyGameStart(accountId: number, gameName: string, tagLine: string, activeGame: any, discordUserId: string) {
+  private async notifyGameStart(accountId: number, gameName: string, tagLine: string, activeGame: any, discordUserId: string, puuid: string) {
     try {
       const channel = await this.client.channels.fetch(this.channelId) as TextChannel;
       if (!channel) return;
@@ -79,8 +79,19 @@ class GameTracker {
       const championId = participant?.championId || 0;
       const queueName = this.riotApi.getQueueName(activeGame.gameQueueConfigId);
 
+      // Get current LP before the game
+      const leagueEntries = await this.riotApi.getLeagueEntries(puuid);
+      const queueType = activeGame.gameQueueConfigId === 420 ? 'RANKED_SOLO_5x5' : 'RANKED_FLEX_SR';
+      const leagueEntry = leagueEntries.find(e => e.queueType === queueType);
+      const lpBefore = leagueEntry?.leaguePoints;
+
       const embed = createGameStartEmbed(gameName, tagLine, championId, queueName, discordUserId);
       await channel.send({ embeds: [embed] });
+      
+      // Store game with LP before
+      const gameId = `${activeGame.platformId}_${activeGame.gameId}`;
+      db.addTrackedGame(accountId, gameId, activeGame.gameStartTime, lpBefore);
+      db.markGameNotifiedStart(gameId);
       
       console.log(`Notified game start for ${gameName}#${tagLine}`);
     } catch (error) {
@@ -123,7 +134,8 @@ class GameTracker {
           match.info.gameDuration,
           this.riotApi.getQueueName(match.info.queueId),
           leagueEntry,
-          discordUserId
+          discordUserId,
+          trackedGame?.lpBefore || undefined
         );
         await channel.send({ embeds: [embed] });
 

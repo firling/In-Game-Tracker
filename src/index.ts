@@ -4,6 +4,7 @@ import RiotApiService from './services/riotApi';
 import GameTracker from './services/tracker';
 import DailyRecapService from './services/dailyRecap';
 import { db } from './database';
+import { championData } from './services/championData';
 
 // Load environment variables
 dotenv.config();
@@ -89,6 +90,10 @@ client.once('ready', async () => {
   console.log('Initializing database...');
   await db.initialize();
   console.log('✅ Database initialized');
+  
+  // Initialize champion data
+  console.log('Loading champion data...');
+  await championData.initialize();
   
   // Register slash commands
   await registerCommands();

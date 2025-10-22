@@ -4,7 +4,7 @@ import { RegisteredAccount, TrackedGame } from '../types';
 
 class DatabaseManager {
   private db: Database | null = null;
-  private dbPath: string = 'data.db';
+  private dbPath: string = process.env.NODE_ENV === 'production' ? '/app/data/data.db' : 'data.db';
   private isInitialized: boolean = false;
 
   async initialize() {
@@ -40,6 +40,7 @@ class DatabaseManager {
         game_end_time INTEGER,
         notified_start INTEGER DEFAULT 0,
         notified_end INTEGER DEFAULT 0,
+        lp_before INTEGER,
         FOREIGN KEY (account_id) REFERENCES accounts(id)
       );
 
@@ -176,15 +177,15 @@ class DatabaseManager {
     return this.mapResultToAccounts(result[0]);
   }
 
-  addTrackedGame(accountId: number, matchId: string, gameStartTime: number): void {
+  addTrackedGame(accountId: number, matchId: string, gameStartTime: number, lpBefore?: number): void {
     if (!this.db) return;
     
     try {
       const stmt = this.db.prepare(
-        `INSERT OR IGNORE INTO tracked_games (account_id, match_id, game_start_time)
-         VALUES (?, ?, ?)`
+        `INSERT OR IGNORE INTO tracked_games (account_id, match_id, game_start_time, lp_before)
+         VALUES (?, ?, ?, ?)`
       );
-      stmt.bind([accountId, matchId, gameStartTime]);
+      stmt.bind([accountId, matchId, gameStartTime, lpBefore !== undefined ? lpBefore : null]);
       stmt.step();
       stmt.free();
       this.save();
@@ -239,7 +240,8 @@ class DatabaseManager {
         gameStartTime: row.game_start_time as number,
         gameEndTime: row.game_end_time as number | null,
         notifiedStart: row.notified_start === 1,
-        notifiedEnd: row.notified_end === 1
+        notifiedEnd: row.notified_end === 1,
+        lpBefore: row.lp_before as number | null
       };
     }
     stmt.free();

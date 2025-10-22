@@ -74,6 +74,7 @@ export interface TrackedGame {
   gameEndTime: number | null;
   notifiedStart: boolean;
   notifiedEnd: boolean;
+  lpBefore: number | null;
 }
 
 export interface ActiveGame {
