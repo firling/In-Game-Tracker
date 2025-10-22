@@ -39,6 +39,8 @@ export function createGameEndEmbed(
     ? 'Perfect' 
     : ((participant.kills + participant.assists) / participant.deaths).toFixed(2);
   
+  const totalCS = participant.totalMinionsKilled + (participant.neutralMinionsKilled || 0);
+  
   const durationMinutes = Math.floor(gameDuration / 60);
   const durationSeconds = gameDuration % 60;
 
@@ -55,7 +57,7 @@ export function createGameEndEmbed(
       { name: '⏱️ Duration', value: `${durationMinutes}:${durationSeconds.toString().padStart(2, '0')}`, inline: true },
       { name: '📊 KDA', value: kda, inline: true },
       { name: '📈 KDA Ratio', value: kdaRatio, inline: true },
-      { name: '🌾 CS', value: participant.totalMinionsKilled.toString(), inline: true }
+      { name: '🌾 CS', value: totalCS.toString(), inline: true }
     )
     .setTimestamp();
 

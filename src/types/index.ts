@@ -41,6 +41,7 @@ export interface Participant {
   assists: number;
   win: boolean;
   totalMinionsKilled: number;
+  neutralMinionsKilled: number;
   champLevel: number;
   item0: number;
   item1: number;

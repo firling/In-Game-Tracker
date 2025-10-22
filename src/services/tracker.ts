@@ -75,7 +75,8 @@ class GameTracker {
       const channel = await this.client.channels.fetch(this.channelId) as TextChannel;
       if (!channel) return;
 
-      const participant = activeGame.participants.find((p: any) => p.puuid);
+      // Find the correct participant by PUUID
+      const participant = activeGame.participants.find((p: any) => p.puuid === puuid);
       const championId = participant?.championId || 0;
       const queueName = this.riotApi.getQueueName(activeGame.gameQueueConfigId);
 
@@ -93,7 +94,7 @@ class GameTracker {
       db.addTrackedGame(accountId, gameId, activeGame.gameStartTime, lpBefore);
       db.markGameNotifiedStart(gameId);
       
-      console.log(`Notified game start for ${gameName}#${tagLine}`);
+      console.log(`Notified game start for ${gameName}#${tagLine} - Champion: ${championId}`);
     } catch (error) {
       console.error('Error notifying game start:', error);
     }
