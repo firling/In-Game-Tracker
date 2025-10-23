@@ -92,7 +92,7 @@ class GameTracker {
       // Store game with LP before
       const gameId = `${activeGame.platformId}_${activeGame.gameId}`;
       db.addTrackedGame(accountId, gameId, activeGame.gameStartTime, lpBefore);
-      db.markGameNotifiedStart(gameId);
+      db.markGameNotifiedStart(accountId, gameId);
       
       console.log(`Notified game start for ${gameName}#${tagLine} - Champion: ${championId}`);
     } catch (error) {
@@ -107,7 +107,7 @@ class GameTracker {
       if (matchIds.length === 0) return;
 
       const latestMatchId = matchIds[0];
-      const trackedGame = db.getTrackedGame(latestMatchId);
+      const trackedGame = db.getTrackedGame(accountId, latestMatchId);
 
       // If this match hasn't been notified yet
       if (!trackedGame || !trackedGame.notifiedEnd) {
@@ -144,7 +144,7 @@ class GameTracker {
         if (!trackedGame) {
           db.addTrackedGame(accountId, latestMatchId, match.info.gameCreation);
         }
-        db.markGameNotifiedEnd(latestMatchId);
+        db.markGameNotifiedEnd(accountId, latestMatchId);
 
         // Save league snapshot
         if (leagueEntry) {

@@ -37,13 +37,14 @@ class DatabaseManager {
       CREATE TABLE IF NOT EXISTS tracked_games (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id INTEGER NOT NULL,
-        match_id TEXT NOT NULL UNIQUE,
+        match_id TEXT NOT NULL,
         game_start_time INTEGER NOT NULL,
         game_end_time INTEGER,
         notified_start INTEGER DEFAULT 0,
         notified_end INTEGER DEFAULT 0,
         lp_before INTEGER,
-        FOREIGN KEY (account_id) REFERENCES accounts(id)
+        FOREIGN KEY (account_id) REFERENCES accounts(id),
+        UNIQUE(account_id, match_id)
       );
 
       CREATE TABLE IF NOT EXISTS league_snapshots (
@@ -83,6 +84,48 @@ class DatabaseManager {
           this.db.exec('ALTER TABLE tracked_games ADD COLUMN lp_before INTEGER');
           this.save();
           console.log('✅ Migration completed: lp_before column added');
+        }
+      }
+
+      // Migration 2: Change UNIQUE constraint from match_id to (account_id, match_id)
+      const indexResult = this.db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='tracked_games'");
+      if (indexResult.length > 0) {
+        const tableSql = indexResult[0].values[0][0] as string;
+        
+        // Check if we need to migrate (old constraint is "match_id TEXT NOT NULL UNIQUE")
+        if (tableSql.includes('match_id TEXT NOT NULL UNIQUE') || !tableSql.includes('UNIQUE(account_id, match_id)')) {
+          console.log('🔄 Migrating tracked_games table to new UNIQUE constraint...');
+          
+          // Create new table with correct constraint
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS tracked_games_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              account_id INTEGER NOT NULL,
+              match_id TEXT NOT NULL,
+              game_start_time INTEGER NOT NULL,
+              game_end_time INTEGER,
+              notified_start INTEGER DEFAULT 0,
+              notified_end INTEGER DEFAULT 0,
+              lp_before INTEGER,
+              FOREIGN KEY (account_id) REFERENCES accounts(id),
+              UNIQUE(account_id, match_id)
+            );
+          `);
+          
+          // Copy data from old table (keep only the first occurrence of each match_id)
+          this.db.exec(`
+            INSERT INTO tracked_games_new 
+            SELECT * FROM tracked_games;
+          `);
+          
+          // Drop old table
+          this.db.exec('DROP TABLE tracked_games;');
+          
+          // Rename new table
+          this.db.exec('ALTER TABLE tracked_games_new RENAME TO tracked_games;');
+          
+          this.save();
+          console.log('✅ Migration completed: UNIQUE constraint updated');
         } else {
           console.log('✅ Database schema is up to date');
         }
@@ -224,41 +267,41 @@ class DatabaseManager {
     }
   }
 
-  updateGameEnd(matchId: string, gameEndTime: number): void {
+  updateGameEnd(accountId: number, matchId: string, gameEndTime: number): void {
     if (!this.db) return;
     
-    const stmt = this.db.prepare('UPDATE tracked_games SET game_end_time = ? WHERE match_id = ?');
-    stmt.bind([gameEndTime, matchId]);
+    const stmt = this.db.prepare('UPDATE tracked_games SET game_end_time = ? WHERE account_id = ? AND match_id = ?');
+    stmt.bind([gameEndTime, accountId, matchId]);
     stmt.step();
     stmt.free();
     this.save();
   }
 
-  markGameNotifiedStart(matchId: string): void {
+  markGameNotifiedStart(accountId: number, matchId: string): void {
     if (!this.db) return;
     
-    const stmt = this.db.prepare('UPDATE tracked_games SET notified_start = 1 WHERE match_id = ?');
-    stmt.bind([matchId]);
+    const stmt = this.db.prepare('UPDATE tracked_games SET notified_start = 1 WHERE account_id = ? AND match_id = ?');
+    stmt.bind([accountId, matchId]);
     stmt.step();
     stmt.free();
     this.save();
   }
 
-  markGameNotifiedEnd(matchId: string): void {
+  markGameNotifiedEnd(accountId: number, matchId: string): void {
     if (!this.db) return;
     
-    const stmt = this.db.prepare('UPDATE tracked_games SET notified_end = 1 WHERE match_id = ?');
-    stmt.bind([matchId]);
+    const stmt = this.db.prepare('UPDATE tracked_games SET notified_end = 1 WHERE account_id = ? AND match_id = ?');
+    stmt.bind([accountId, matchId]);
     stmt.step();
     stmt.free();
     this.save();
   }
 
-  getTrackedGame(matchId: string): TrackedGame | null {
+  getTrackedGame(accountId: number, matchId: string): TrackedGame | null {
     if (!this.db) return null;
     
-    const stmt = this.db.prepare('SELECT * FROM tracked_games WHERE match_id = ?');
-    stmt.bind([matchId]);
+    const stmt = this.db.prepare('SELECT * FROM tracked_games WHERE account_id = ? AND match_id = ?');
+    stmt.bind([accountId, matchId]);
     
     let game: TrackedGame | null = null;
     if (stmt.step()) {
