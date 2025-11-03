@@ -43,6 +43,8 @@ class DatabaseManager {
         notified_start INTEGER DEFAULT 0,
         notified_end INTEGER DEFAULT 0,
         lp_before INTEGER,
+        tier_before TEXT,
+        rank_before TEXT,
         FOREIGN KEY (account_id) REFERENCES accounts(id),
         UNIQUE(account_id, match_id)
       );
@@ -85,6 +87,20 @@ class DatabaseManager {
           this.save();
           console.log('✅ Migration completed: lp_before column added');
         }
+
+        if (!columns.includes('tier_before')) {
+          console.log('➕ Adding tier_before column to tracked_games...');
+          this.db.exec('ALTER TABLE tracked_games ADD COLUMN tier_before TEXT');
+          this.save();
+          console.log('✅ Migration completed: tier_before column added');
+        }
+
+        if (!columns.includes('rank_before')) {
+          console.log('➕ Adding rank_before column to tracked_games...');
+          this.db.exec('ALTER TABLE tracked_games ADD COLUMN rank_before TEXT');
+          this.save();
+          console.log('✅ Migration completed: rank_before column added');
+        }
       }
 
       // Migration 2: Change UNIQUE constraint from match_id to (account_id, match_id)
@@ -107,12 +123,14 @@ class DatabaseManager {
               notified_start INTEGER DEFAULT 0,
               notified_end INTEGER DEFAULT 0,
               lp_before INTEGER,
+              tier_before TEXT,
+              rank_before TEXT,
               FOREIGN KEY (account_id) REFERENCES accounts(id),
               UNIQUE(account_id, match_id)
             );
           `);
           
-          // Copy data from old table (keep only the first occurrence of each match_id)
+          // Copy data from old table
           this.db.exec(`
             INSERT INTO tracked_games_new 
             SELECT * FROM tracked_games;
@@ -250,15 +268,22 @@ class DatabaseManager {
     return this.mapResultToAccounts(result[0]);
   }
 
-  addTrackedGame(accountId: number, matchId: string, gameStartTime: number, lpBefore?: number): void {
+  addTrackedGame(accountId: number, matchId: string, gameStartTime: number, lpBefore?: number, tierBefore?: string, rankBefore?: string): void {
     if (!this.db) return;
     
     try {
       const stmt = this.db.prepare(
-        `INSERT OR IGNORE INTO tracked_games (account_id, match_id, game_start_time, lp_before)
-         VALUES (?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO tracked_games (account_id, match_id, game_start_time, lp_before, tier_before, rank_before)
+         VALUES (?, ?, ?, ?, ?, ?)`
       );
-      stmt.bind([accountId, matchId, gameStartTime, lpBefore !== undefined ? lpBefore : null]);
+      stmt.bind([
+        accountId,
+        matchId,
+        gameStartTime,
+        lpBefore !== undefined ? lpBefore : null,
+        tierBefore || null,
+        rankBefore || null
+      ]);
       stmt.step();
       stmt.free();
       this.save();
@@ -314,7 +339,9 @@ class DatabaseManager {
         gameEndTime: row.game_end_time as number | null,
         notifiedStart: row.notified_start === 1,
         notifiedEnd: row.notified_end === 1,
-        lpBefore: row.lp_before as number | null
+        lpBefore: row.lp_before as number | null,
+        tierBefore: row.tier_before as string | null,
+        rankBefore: row.rank_before as string | null
       };
     }
     stmt.free();

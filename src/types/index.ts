@@ -76,6 +76,8 @@ export interface TrackedGame {
   notifiedStart: boolean;
   notifiedEnd: boolean;
   lpBefore: number | null;
+  tierBefore: string | null;
+  rankBefore: string | null;
 }
 
 export interface ActiveGame {
