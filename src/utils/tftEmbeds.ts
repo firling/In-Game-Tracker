@@ -79,26 +79,24 @@ export function createTFTGameEndEmbed(
   // Add team composition with items
   if (participant.units && participant.units.length > 0) {
     const units = participant.units
-      .sort((a, b) => b.rarity - a.rarity) // Sort by cost (highest first)
+      .sort((a, b) => {
+        const costA = tftData.getChampionCost(a.character_id) || a.rarity;
+        const costB = tftData.getChampionCost(b.character_id) || b.rarity;
+        return costB - costA;
+      })
       .map(unit => {
-        const championIcon = tftData.getChampionIcon(unit.character_id);
         const championName = tftData.getChampionName(unit.character_id);
         const stars = '⭐'.repeat(unit.tier);
-        const cost = tftData.getChampionCost(unit.character_id);
 
         let itemText = '';
         if (unit.items && unit.items.length > 0) {
-          const itemIcons = unit.items
-            .map(itemId => {
-              const itemIcon = tftData.getItemIcon(itemId);
-              const itemName = tftData.getItemName(itemId);
-              return `[${itemName}](${itemIcon})`;
-            })
-            .join(' ');
-          itemText = `\n  └ ${itemIcons}`;
+          const items = unit.items
+            .map(itemId => tftData.getItemName(itemId))
+            .join(', ');
+          itemText = `\n  └ 🎒 ${items}`;
         }
 
-        return `[${championName}](${championIcon}) ${stars} (${cost}⭐)${itemText}`;
+        return `**${championName}** ${stars}${itemText}`;
       })
       .join('\n');
 
