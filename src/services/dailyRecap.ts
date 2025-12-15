@@ -66,14 +66,55 @@ class DailyRecapService {
           // Get oldest snapshot in the last 24 hours
           const oldestSnapshot = queueSnapshots[queueSnapshots.length - 1];
           
-          const lpChange = currentEntry.leaguePoints - oldestSnapshot.league_points;
+          // Calculate LP change considering rank changes
+          let lpChange = 0;
+          const oldTier = oldestSnapshot.tier;
+          const oldRank = oldestSnapshot.rank;
+          const newTier = currentEntry.tier;
+          const newRank = currentEntry.rank;
+
+          // Rank order for comparison
+          const tierOrder: { [key: string]: number } = {
+            'IRON': 0, 'BRONZE': 1, 'SILVER': 2, 'GOLD': 3,
+            'PLATINUM': 4, 'EMERALD': 5, 'DIAMOND': 6,
+            'MASTER': 7, 'GRANDMASTER': 8, 'CHALLENGER': 9
+          };
+
+          const rankOrder: { [key: string]: number } = {
+            'IV': 0, 'III': 1, 'II': 2, 'I': 3
+          };
+
+          const oldTierValue = tierOrder[oldTier] || 0;
+          const newTierValue = tierOrder[newTier] || 0;
+          const oldRankValue = rankOrder[oldRank] || 0;
+          const newRankValue = rankOrder[newRank] || 0;
+
+          // Check if rank changed
+          const rankChanged = oldTierValue !== newTierValue || oldRankValue !== newRankValue;
+
+          if (rankChanged) {
+            // Rank changed - estimate LP change
+            if (newTierValue > oldTierValue || (newTierValue === oldTierValue && newRankValue > oldRankValue)) {
+              // Promotion
+              const divisionsGained = (newTierValue - oldTierValue) * 4 + (newRankValue - oldRankValue);
+              lpChange = (100 - oldestSnapshot.league_points) + currentEntry.leaguePoints + (divisionsGained - 1) * 100;
+            } else {
+              // Demotion
+              const divisionsLost = (oldTierValue - newTierValue) * 4 + (oldRankValue - newRankValue);
+              lpChange = -(oldestSnapshot.league_points + (100 - currentEntry.leaguePoints) + (divisionsLost - 1) * 100);
+            }
+          } else {
+            // Same rank, simple LP difference
+            lpChange = currentEntry.leaguePoints - oldestSnapshot.league_points;
+          }
+
           const wins = currentEntry.wins - oldestSnapshot.wins;
           const losses = currentEntry.losses - oldestSnapshot.losses;
 
           // Only include if there were games played
           if (wins > 0 || losses > 0) {
-            const oldRank = `${oldestSnapshot.tier} ${oldestSnapshot.rank}`;
-            const newRank = `${currentEntry.tier} ${currentEntry.rank}`;
+            const oldRankStr = `${oldestSnapshot.tier} ${oldestSnapshot.rank}`;
+            const newRankStr = `${currentEntry.tier} ${currentEntry.rank}`;
 
             recapData.push({
               gameName: account.gameName,
@@ -81,8 +122,8 @@ class DailyRecapService {
               discordUserId: account.discordUserId,
               queueType,
               lpChange,
-              oldRank,
-              newRank,
+              oldRank: oldRankStr,
+              newRank: newRankStr,
               wins,
               losses
             });
@@ -93,11 +134,15 @@ class DailyRecapService {
         await this.sleep(1000);
       }
 
-      // Send recap embed
-      const embed = createDailyRecapEmbed(recapData);
-      await channel.send({ embeds: [embed] });
+      if (recapData.length > 0) {
+        // Send recap embed
+        const embed = createDailyRecapEmbed(recapData);
+        await channel.send({ embeds: [embed] });
 
-      console.log('Daily recap sent successfully');
+        console.log('Daily recap sent successfully');
+      } else {
+        console.log('No games played in the last 24 hours, skipping recap');
+      }
     } catch (error) {
       console.error('Error sending daily recap:', error);
     }
