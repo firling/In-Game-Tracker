@@ -2,9 +2,12 @@ import { Client, GatewayIntentBits, REST, Routes, Collection, ChatInputCommandIn
 import dotenv from 'dotenv';
 import RiotApiService from './services/riotApi';
 import GameTracker from './services/tracker';
+import TFTGameTracker from './services/tftTracker';
+import TFTApiService from './services/tftApi';
 import DailyRecapService from './services/dailyRecap';
 import { db } from './database';
 import { championData } from './services/championData';
+import { tftData } from './services/tftData';
 
 // Load environment variables
 dotenv.config();
@@ -24,6 +27,9 @@ for (const envVar of requiredEnvVars) {
     process.exit(1);
   }
 }
+
+// Optional TFT channel ID (defaults to NOTIFICATION_CHANNEL_ID if not set)
+const TFT_CHANNEL_ID = process.env.TFT_NOTIFICATION_CHANNEL_ID || process.env.NOTIFICATION_CHANNEL_ID;
 
 // Import commands
 import * as registerCommand from './commands/register';
@@ -52,7 +58,9 @@ commands.set(statsCommand.data.name, statsCommand as Command);
 
 // Initialize services
 const riotApi = new RiotApiService(process.env.RIOT_API_KEY!);
+const tftApi = new TFTApiService(process.env.RIOT_API_KEY!);
 let gameTracker: GameTracker;
+let tftGameTracker: TFTGameTracker;
 let dailyRecap: DailyRecapService;
 
 // Register slash commands
@@ -94,7 +102,11 @@ client.once('ready', async () => {
   // Initialize champion data
   console.log('Loading champion data...');
   await championData.initialize();
-  
+
+  // Initialize TFT data
+  console.log('Loading TFT data...');
+  await tftData.initialize();
+
   // Register slash commands
   await registerCommands();
 
@@ -107,6 +119,15 @@ client.once('ready', async () => {
     trackingInterval
   );
   gameTracker.start();
+
+  // Start TFT game tracker
+  tftGameTracker = new TFTGameTracker(
+    client,
+    tftApi,
+    TFT_CHANNEL_ID!,
+    trackingInterval
+  );
+  tftGameTracker.start();
 
   // Start daily recap service
   dailyRecap = new DailyRecapService(
@@ -142,6 +163,7 @@ client.on('interactionCreate', async (interaction) => {
 process.on('SIGINT', () => {
   console.log('\n⏹️ Shutting down gracefully...');
   if (gameTracker) gameTracker.stop();
+  if (tftGameTracker) tftGameTracker.stop();
   client.destroy();
   process.exit(0);
 });

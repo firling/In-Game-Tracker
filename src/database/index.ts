@@ -58,6 +58,31 @@ class DatabaseManager {
         timestamp INTEGER NOT NULL,
         FOREIGN KEY (account_id) REFERENCES accounts(id)
       );
+
+      CREATE TABLE IF NOT EXISTS tracked_tft_games (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        match_id TEXT NOT NULL UNIQUE,
+        game_start_time INTEGER NOT NULL,
+        game_end_time INTEGER,
+        notified_start INTEGER DEFAULT 0,
+        notified_end INTEGER DEFAULT 0,
+        lp_before INTEGER,
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS tft_league_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        queue_type TEXT NOT NULL,
+        tier TEXT NOT NULL,
+        rank TEXT NOT NULL,
+        league_points INTEGER NOT NULL,
+        wins INTEGER NOT NULL,
+        losses INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      );
     `);
 
     // Run migrations
@@ -320,6 +345,111 @@ class DatabaseManager {
       puuid: row[4] as string,
       createdAt: row[5] as number
     }));
+  }
+
+  // TFT Methods
+  addTrackedTFTGame(accountId: number, matchId: string, gameStartTime: number, lpBefore?: number): void {
+    if (!this.db) return;
+
+    try {
+      const stmt = this.db.prepare(
+        `INSERT OR IGNORE INTO tracked_tft_games (account_id, match_id, game_start_time, lp_before)
+         VALUES (?, ?, ?, ?)`
+      );
+      stmt.bind([accountId, matchId, gameStartTime, lpBefore !== undefined ? lpBefore : null]);
+      stmt.step();
+      stmt.free();
+      this.save();
+    } catch (error) {
+      console.error('Error adding tracked TFT game:', error);
+    }
+  }
+
+  updateTFTGameEnd(matchId: string, gameEndTime: number): void {
+    if (!this.db) return;
+
+    const stmt = this.db.prepare('UPDATE tracked_tft_games SET game_end_time = ? WHERE match_id = ?');
+    stmt.bind([gameEndTime, matchId]);
+    stmt.step();
+    stmt.free();
+    this.save();
+  }
+
+  markTFTGameNotifiedStart(matchId: string): void {
+    if (!this.db) return;
+
+    const stmt = this.db.prepare('UPDATE tracked_tft_games SET notified_start = 1 WHERE match_id = ?');
+    stmt.bind([matchId]);
+    stmt.step();
+    stmt.free();
+    this.save();
+  }
+
+  markTFTGameNotifiedEnd(matchId: string): void {
+    if (!this.db) return;
+
+    const stmt = this.db.prepare('UPDATE tracked_tft_games SET notified_end = 1 WHERE match_id = ?');
+    stmt.bind([matchId]);
+    stmt.step();
+    stmt.free();
+    this.save();
+  }
+
+  getTrackedTFTGame(matchId: string): any | null {
+    if (!this.db) return null;
+
+    const stmt = this.db.prepare('SELECT * FROM tracked_tft_games WHERE match_id = ?');
+    stmt.bind([matchId]);
+
+    let game: any | null = null;
+    if (stmt.step()) {
+      const row = stmt.getAsObject();
+      game = {
+        id: row.id as number,
+        accountId: row.account_id as number,
+        matchId: row.match_id as string,
+        gameStartTime: row.game_start_time as number,
+        gameEndTime: row.game_end_time as number | null,
+        notifiedStart: row.notified_start === 1,
+        notifiedEnd: row.notified_end === 1,
+        lpBefore: row.lp_before as number | null
+      };
+    }
+    stmt.free();
+
+    return game;
+  }
+
+  saveTFTLeagueSnapshot(accountId: number, queueType: string, tier: string, rank: string, lp: number, wins: number, losses: number): void {
+    if (!this.db) return;
+
+    const stmt = this.db.prepare(
+      `INSERT INTO tft_league_snapshots (account_id, queue_type, tier, rank, league_points, wins, losses, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    stmt.bind([accountId, queueType, tier, rank, lp, wins, losses, Date.now()]);
+    stmt.step();
+    stmt.free();
+    this.save();
+  }
+
+  getTFTLeagueSnapshotsBetween(accountId: number, startTime: number, endTime: number): any[] {
+    if (!this.db) return [];
+
+    const stmt = this.db.prepare(
+      `SELECT * FROM tft_league_snapshots
+       WHERE account_id = ? AND timestamp BETWEEN ? AND ?
+       ORDER BY timestamp DESC`
+    );
+    stmt.bind([accountId, startTime, endTime]);
+
+    const snapshots: any[] = [];
+    while (stmt.step()) {
+      snapshots.push(stmt.getAsObject());
+    }
+    stmt.free();
+
+    return snapshots;
   }
 
   close() {
