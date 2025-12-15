@@ -35,7 +35,7 @@ export function createTFTGameEndEmbed(
   const isTop4 = placement <= 4;
 
   const durationMinutes = Math.floor(gameDuration / 60);
-  const durationSeconds = gameDuration % 60;
+  const durationSeconds = Math.floor(gameDuration % 60);
 
   // Determine color based on placement
   let color = 0xFF0000; // Red for bottom 4
@@ -81,19 +81,24 @@ export function createTFTGameEndEmbed(
     const units = participant.units
       .sort((a, b) => b.rarity - a.rarity) // Sort by cost (highest first)
       .map(unit => {
+        const championIcon = tftData.getChampionIcon(unit.character_id);
         const championName = tftData.getChampionName(unit.character_id);
         const stars = '⭐'.repeat(unit.tier);
         const cost = tftData.getChampionCost(unit.character_id);
 
         let itemText = '';
         if (unit.items && unit.items.length > 0) {
-          const items = unit.items
-            .map(itemId => tftData.getItemName(itemId))
-            .join(', ');
-          itemText = `\n  └ 🎒 ${items}`;
+          const itemIcons = unit.items
+            .map(itemId => {
+              const itemIcon = tftData.getItemIcon(itemId);
+              const itemName = tftData.getItemName(itemId);
+              return `[${itemName}](${itemIcon})`;
+            })
+            .join(' ');
+          itemText = `\n  └ ${itemIcons}`;
         }
 
-        return `**${championName}** ${stars} (${cost}⭐)${itemText}`;
+        return `[${championName}](${championIcon}) ${stars} (${cost}⭐)${itemText}`;
       })
       .join('\n');
 

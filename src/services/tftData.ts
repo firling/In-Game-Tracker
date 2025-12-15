@@ -47,7 +47,7 @@ class TFTDataService {
       for (const [key, champion] of Object.entries<any>(championsResponse.data.data)) {
         this.champions.set(key, {
           name: champion.name,
-          cost: champion.cost,
+          cost: champion.tier,
           traits: champion.traits || []
         });
       }

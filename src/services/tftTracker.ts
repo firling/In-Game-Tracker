@@ -34,7 +34,6 @@ class TFTGameTracker {
 
   private async checkAllAccounts() {
     const accounts = db.getAllAccounts();
-    console.log(`[TFT Tracker] Checking ${accounts.length} accounts...`);
 
     // Optimize: Check all accounts in batches to reduce sequential waiting
     const batchSize = 5; // Check 5 accounts in parallel
@@ -59,7 +58,6 @@ class TFTGameTracker {
       const activeGame = await this.tftApi.getActiveGameByPuuid(puuid);
 
       if (activeGame && this.tftApi.isRankedTFTQueue(activeGame.gameQueueConfigId)) {
-        console.log(`[TFT Tracker] ${gameName}#${tagLine} is in an active TFT game (queue: ${activeGame.gameQueueConfigId})`);
         const gameId = `TFT_${activeGame.platformId}_${activeGame.gameId}`;
 
         // Check if this is a new game
@@ -70,7 +68,6 @@ class TFTGameTracker {
       } else {
         // Player not in game, check if they just finished a game
         if (this.activeGames.has(accountId)) {
-          console.log(`[TFT Tracker] ${gameName}#${tagLine} finished their game, checking recent matches...`);
           const oldGameId = this.activeGames.get(accountId)!;
           this.activeGames.delete(accountId);
 
@@ -117,34 +114,26 @@ class TFTGameTracker {
   private async checkRecentMatches(accountId: number, puuid: string, gameName: string, tagLine: string, discordUserId: string) {
     try {
       const matchIds = await this.tftApi.getMatchIdsByPuuid(puuid, 1);
-      console.log(`[TFT Tracker] ${gameName}#${tagLine} has ${matchIds.length} recent TFT matches`);
 
       if (matchIds.length === 0) return;
 
       const latestMatchId = matchIds[0];
       const trackedGame = db.getTrackedTFTGame(latestMatchId);
 
-      console.log(`[TFT Tracker] Latest match ID: ${latestMatchId}, Already notified: ${trackedGame?.notifiedEnd ? 'YES' : 'NO'}`);
-
       // If this match hasn't been notified yet
       if (!trackedGame || !trackedGame.notifiedEnd) {
         const match = await this.tftApi.getMatchById(latestMatchId);
         if (!match) {
-          console.log(`[TFT Tracker] Could not fetch match data for ${latestMatchId}`);
           return;
         }
 
-        console.log(`[TFT Tracker] Match queue ID: ${match.info.queue_id}, Is ranked: ${this.tftApi.isRankedTFTQueue(match.info.queue_id)}`);
-
         // Only notify ranked games
         if (!this.tftApi.isRankedTFTQueue(match.info.queue_id)) {
-          console.log(`[TFT Tracker] Skipping non-ranked queue ${match.info.queue_id}`);
           return;
         }
 
         const participant = match.info.participants.find(p => p.puuid === puuid);
         if (!participant) {
-          console.log(`[TFT Tracker] Could not find participant in match`);
           return;
         }
 
