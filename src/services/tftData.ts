@@ -82,6 +82,10 @@ class TFTDataService {
       console.log(`✅ Loaded ${this.champions.size} TFT champions`);
       console.log(`✅ Loaded ${this.items.size} TFT items`);
       console.log(`✅ Loaded ${this.traits.size} TFT traits`);
+
+      // Debug: Log a few champion keys
+      const sampleKeys = Array.from(this.champions.keys()).slice(0, 5);
+      console.log(`Sample champion keys: ${sampleKeys.join(', ')}`);
     } catch (error) {
       console.error('Error loading TFT data:', error);
     }
@@ -89,6 +93,9 @@ class TFTDataService {
 
   getChampionName(championId: string): string {
     const champion = this.champions.get(championId);
+    if (!champion) {
+      console.log(`[TFT Data] Champion not found: ${championId}`);
+    }
     return champion ? champion.name : championId;
   }
 
