@@ -86,7 +86,7 @@ export function createTFTGameEndEmbed(
       })
       .map(unit => {
         const championName = tftData.getChampionName(unit.character_id);
-        const stars = '⭐'.repeat(unit.tier);
+        const stars = '★'.repeat(unit.tier);
 
         let itemText = '';
         if (unit.items && unit.items.length > 0) {

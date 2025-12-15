@@ -84,8 +84,12 @@ class TFTDataService {
       console.log(`✅ Loaded ${this.traits.size} TFT traits`);
 
       // Debug: Log a few champion keys
-      const sampleKeys = Array.from(this.champions.keys()).slice(0, 5);
-      console.log(`Sample champion keys: ${sampleKeys.join(', ')}`);
+      const sampleChampionKeys = Array.from(this.champions.keys()).slice(0, 5);
+      console.log(`Sample champion keys: ${sampleChampionKeys.join(', ')}`);
+
+      // Debug: Log a few item IDs
+      const sampleItemIds = Array.from(this.items.keys()).slice(0, 10);
+      console.log(`Sample item IDs: ${sampleItemIds.join(', ')}`);
     } catch (error) {
       console.error('Error loading TFT data:', error);
     }
@@ -93,14 +97,33 @@ class TFTDataService {
 
   getChampionName(championId: string): string {
     const champion = this.champions.get(championId);
-    if (!champion) {
-      console.log(`[TFT Data] Champion not found: ${championId}`);
+    if (champion) {
+      return champion.name;
     }
-    return champion ? champion.name : championId;
+
+    // Fallback: Extract name from ID (e.g., "TFT16_Kindred" -> "Kindred")
+    const match = championId.match(/^TFT\d+_(.+)$/);
+    if (match) {
+      // Handle special cases like JarvanIV -> Jarvan IV
+      let name = match[1];
+      if (name === 'JarvanIV') return 'Jarvan IV';
+      if (name === 'KogMaw') return "Kog'Maw";
+      if (name === 'TahmKench') return 'Tahm Kench';
+      if (name === 'MasterYi') return 'Master Yi';
+      if (name === 'MissFortune') return 'Miss Fortune';
+      if (name === 'TwistedFate') return 'Twisted Fate';
+      if (name === 'AurelionSol') return 'Aurelion Sol';
+      if (name === 'LeeSin') return 'Lee Sin';
+      if (name === 'XinZhao') return 'Xin Zhao';
+      return name;
+    }
+
+    return championId;
   }
 
   getChampionCost(championId: string): number {
     const champion = this.champions.get(championId);
+    // Return 0 if not found - the caller should use unit.rarity as fallback
     return champion ? champion.cost : 0;
   }
 
@@ -115,6 +138,9 @@ class TFTDataService {
 
   getItemName(itemId: number): string {
     const item = this.items.get(itemId);
+    if (!item) {
+      console.log(`[TFT Data] Item not found: ${itemId}`);
+    }
     return item ? item.name : `Item ${itemId}`;
   }
 
