@@ -37,6 +37,7 @@ class TFTApiService {
 
   async getMatchIdsByPuuid(puuid: string, count: number = 5): Promise<string[]> {
     try {
+      // TFT uses same routing as LoL matches
       const response = await this.axiosInstance.get(
         `https://${this.region}.api.riotgames.com/tft/match/v1/matches/by-puuid/${puuid}/ids`,
         {
@@ -46,9 +47,15 @@ class TFTApiService {
           }
         }
       );
+      console.log(`[TFT API] Successfully fetched ${response.data.length} match IDs`);
       return response.data;
     } catch (error: any) {
-      console.error(`Error fetching TFT match IDs for PUUID ${puuid}:`, error.response?.data || error.message);
+      if (error.response?.status === 403) {
+        console.error(`[TFT API] ❌ 403 Forbidden - Your Riot API key does not have access to TFT endpoints!`);
+        console.error(`[TFT API] Please regenerate your API key at https://developer.riotgames.com/`);
+      } else {
+        console.error(`Error fetching TFT match IDs for PUUID ${puuid}:`, error.response?.data || error.message);
+      }
       return [];
     }
   }
