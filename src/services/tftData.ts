@@ -24,6 +24,7 @@ interface TFTTrait {
 
 class TFTDataService {
   private champions: Map<string, TFTChampion> = new Map();
+  private championsByApiId: Map<string, TFTChampion> = new Map(); // Map by API ID like "TFT16_Kindred"
   private items: Map<number, TFTItem> = new Map();
   private traits: Map<string, TFTTrait> = new Map();
   private version: string = '';
@@ -45,11 +46,23 @@ class TFTDataService {
       );
 
       for (const [key, champion] of Object.entries<any>(championsResponse.data.data)) {
-        this.champions.set(key, {
+        const championData = {
           name: champion.name,
           cost: champion.tier,
           traits: champion.traits || []
-        });
+        };
+        this.champions.set(key, championData);
+
+        // Also create mapping by apiName if available, or extract from key
+        if (champion.apiName) {
+          this.championsByApiId.set(champion.apiName, championData);
+        }
+        // Extract champion ID from key like "TFT13_Jinx" from the path
+        const match = key.match(/TFT\w+_(\w+)$/);
+        if (match) {
+          const extractedId = match[0]; // e.g., "TFT13_Jinx"
+          this.championsByApiId.set(extractedId, championData);
+        }
       }
 
       // Load TFT items
@@ -58,12 +71,29 @@ class TFTDataService {
       );
 
       for (const [key, item] of Object.entries<any>(itemsResponse.data.data)) {
-        const itemId = parseInt(key.replace('TFT_Item_', '').replace('TFT', ''));
-        this.items.set(itemId, {
-          id: itemId,
-          name: item.name,
-          icon: `${this.cdnBaseUrl}/${this.version}/img/tft-item/${item.image.full}`
-        });
+        // Items in Data Dragon have IDs as strings, need to extract numeric ID
+        // Try different patterns: "TFT_Item_1", "TFT13_Item_BFSword", etc.
+        let itemId: number;
+
+        if (item.id !== undefined && typeof item.id === 'number') {
+          itemId = item.id;
+        } else {
+          // Try to extract number from key
+          const numMatch = key.match(/\d+/);
+          if (numMatch) {
+            itemId = parseInt(numMatch[0]);
+          } else {
+            continue; // Skip if we can't determine ID
+          }
+        }
+
+        if (!isNaN(itemId)) {
+          this.items.set(itemId, {
+            id: itemId,
+            name: item.name,
+            icon: `${this.cdnBaseUrl}/${this.version}/img/tft-item/${item.image.full}`
+          });
+        }
       }
 
       // Load TFT traits
@@ -96,6 +126,13 @@ class TFTDataService {
   }
 
   getChampionName(championId: string): string {
+    // Try API ID map first
+    const championByApiId = this.championsByApiId.get(championId);
+    if (championByApiId) {
+      return championByApiId.name;
+    }
+
+    // Try regular map
     const champion = this.champions.get(championId);
     if (champion) {
       return champion.name;
@@ -122,6 +159,12 @@ class TFTDataService {
   }
 
   getChampionCost(championId: string): number {
+    // Try API ID map first
+    const championByApiId = this.championsByApiId.get(championId);
+    if (championByApiId) {
+      return championByApiId.cost;
+    }
+
     const champion = this.champions.get(championId);
     // Return 0 if not found - the caller should use unit.rarity as fallback
     return champion ? champion.cost : 0;
