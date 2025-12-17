@@ -30,6 +30,10 @@ class TFTApiService {
       );
       return response.data;
     } catch (error: any) {
+      // Ignore 400 errors for unranked players
+      if (error.response?.status === 400) {
+        return [];
+      }
       console.error(`Error fetching TFT league entries for PUUID ${puuid}:`, error.response?.data || error.message);
       return [];
     }
