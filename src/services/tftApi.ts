@@ -18,23 +18,30 @@ class TFTApiService {
 
   async getLeagueEntries(puuid: string): Promise<TFTLeagueEntry[]> {
     try {
-      // First get summonerId from puuid
+      // First get summonerId from puuid (also contains encrypted summonerId)
       const summonerResponse = await this.axiosInstance.get(
         `https://${this.platform}.api.riotgames.com/tft/summoner/v1/summoners/by-puuid/${puuid}`
       );
-      const summonerId = summonerResponse.data.id;
+      const encryptedSummonerId = summonerResponse.data.id;
 
-      // Then get league entries
+      // Debug log to see the response structure
+      console.log(`[TFT API Debug] Encrypted summoner ID: ${encryptedSummonerId}`);
+
+      // Then get league entries using encrypted summoner ID
       const response = await this.axiosInstance.get(
-        `https://${this.platform}.api.riotgames.com/tft/league/v1/entries/by-summoner/${summonerId}`
+        `https://${this.platform}.api.riotgames.com/tft/league/v1/entries/by-summoner/${encryptedSummonerId}`
       );
+
+      console.log(`[TFT API Debug] League entries response:`, JSON.stringify(response.data, null, 2));
       return response.data;
     } catch (error: any) {
-      // Ignore 400 errors for unranked players
-      if (error.response?.status === 400) {
-        return [];
-      }
-      console.error(`Error fetching TFT league entries for PUUID ${puuid}:`, error.response?.data || error.message);
+      // Log the full error for debugging
+      console.error(`Error fetching TFT league entries for PUUID ${puuid}:`, {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        url: error.config?.url
+      });
       return [];
     }
   }
