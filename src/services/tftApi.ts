@@ -18,9 +18,9 @@ class TFTApiService {
 
   async getLeagueEntries(puuid: string): Promise<TFTLeagueEntry[]> {
     try {
-      // Use the by-puuid endpoint directly (like LoL now does)
+      // Use the by-puuid endpoint (note: different path than LoL - no /entries/)
       const response = await this.axiosInstance.get(
-        `https://${this.platform}.api.riotgames.com/tft/league/v1/entries/by-puuid/${puuid}`
+        `https://${this.platform}.api.riotgames.com/tft/league/v1/by-puuid/${puuid}`
       );
       return response.data;
     } catch (error: any) {
