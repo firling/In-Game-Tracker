@@ -18,30 +18,13 @@ class TFTApiService {
 
   async getLeagueEntries(puuid: string): Promise<TFTLeagueEntry[]> {
     try {
-      // First get summonerId from puuid (also contains encrypted summonerId)
-      const summonerResponse = await this.axiosInstance.get(
-        `https://${this.platform}.api.riotgames.com/tft/summoner/v1/summoners/by-puuid/${puuid}`
-      );
-      const encryptedSummonerId = summonerResponse.data.id;
-
-      // Debug log to see the response structure
-      console.log(`[TFT API Debug] Encrypted summoner ID: ${encryptedSummonerId}`);
-
-      // Then get league entries using encrypted summoner ID
+      // Use the by-puuid endpoint directly (like LoL now does)
       const response = await this.axiosInstance.get(
-        `https://${this.platform}.api.riotgames.com/tft/league/v1/entries/by-summoner/${encryptedSummonerId}`
+        `https://${this.platform}.api.riotgames.com/tft/league/v1/entries/by-puuid/${puuid}`
       );
-
-      console.log(`[TFT API Debug] League entries response:`, JSON.stringify(response.data, null, 2));
       return response.data;
     } catch (error: any) {
-      // Log the full error for debugging
-      console.error(`Error fetching TFT league entries for PUUID ${puuid}:`, {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        url: error.config?.url
-      });
+      console.error(`Error fetching TFT league entries for PUUID ${puuid}:`, error.response?.data || error.message);
       return [];
     }
   }
