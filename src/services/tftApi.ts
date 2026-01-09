@@ -16,6 +16,11 @@ class TFTApiService {
     });
   }
 
+  updateApiKey(newApiKey: string): void {
+    this.apiKey = newApiKey;
+    this.axiosInstance.defaults.headers['X-Riot-Token'] = newApiKey;
+  }
+
   async getLeagueEntries(puuid: string): Promise<TFTLeagueEntry[]> {
     try {
       // Use the by-puuid endpoint (note: different path than LoL - no /entries/)

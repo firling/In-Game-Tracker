@@ -40,7 +40,7 @@ import * as setapikeyCommand from './commands/setapikey';
 // Define command interface
 interface Command {
   data: any;
-  execute: (interaction: ChatInputCommandInteraction, riotApi: RiotApiService) => Promise<void>;
+  execute: (interaction: ChatInputCommandInteraction, riotApi: RiotApiService, tftApi?: TFTApiService) => Promise<void>;
 }
 
 // Create Discord client
@@ -151,7 +151,7 @@ client.on('interactionCreate', async (interaction) => {
   if (!command) return;
 
   try {
-    await command.execute(interaction, riotApi);
+    await command.execute(interaction, riotApi, tftApi);
   } catch (error) {
     console.error('Error executing command:', error);
     const replyMethod = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
