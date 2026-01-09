@@ -35,6 +35,7 @@ const TFT_CHANNEL_ID = process.env.TFT_NOTIFICATION_CHANNEL_ID || process.env.NO
 import * as registerCommand from './commands/register';
 import * as unregisterCommand from './commands/unregister';
 import * as statsCommand from './commands/stats';
+import * as setapikeyCommand from './commands/setapikey';
 
 // Define command interface
 interface Command {
@@ -55,6 +56,7 @@ const commands = new Collection<string, Command>();
 commands.set(registerCommand.data.name, registerCommand as Command);
 commands.set(unregisterCommand.data.name, unregisterCommand as Command);
 commands.set(statsCommand.data.name, statsCommand as Command);
+commands.set(setapikeyCommand.data.name, setapikeyCommand as Command);
 
 // Initialize services
 const riotApi = new RiotApiService(process.env.RIOT_API_KEY!);
@@ -70,7 +72,8 @@ async function registerCommands() {
   const commandData = [
     registerCommand.data.toJSON(),
     unregisterCommand.data.toJSON(),
-    statsCommand.data.toJSON()
+    statsCommand.data.toJSON(),
+    setapikeyCommand.data.toJSON()
   ];
 
   try {

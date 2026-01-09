@@ -16,6 +16,11 @@ class RiotApiService {
     });
   }
 
+  updateApiKey(newApiKey: string): void {
+    this.apiKey = newApiKey;
+    this.axiosInstance.defaults.headers['X-Riot-Token'] = newApiKey;
+  }
+
   async getAccountByRiotId(gameName: string, tagLine: string): Promise<RiotAccount | null> {
     try {
       const response = await this.axiosInstance.get(
