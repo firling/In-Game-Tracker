@@ -104,7 +104,7 @@ Toutes les variables sont documentées dans [`.env.example`](.env.example). Les 
 | `NOTIFICATION_CHANNEL_ID` | — | **Requis.** Salon des annonces. |
 | `RIOT_API_KEY` | — | **Requis.** Clé de démarrage ; `/apikey` la remplace ensuite en base. |
 | `RIOT_PLATFORM` | `euw1` | Serveur Riot (`euw1`, `na1`, `kr`, `br1`…). |
-| `RIOT_KEY_TIER` | `development` | Calibre le limiteur de débit (`development` ou `production`). |
+| `RIOT_KEY_TIER` | `development` | Budget **initial** du limiteur. Corrigé automatiquement dès la première réponse de Riot. |
 | `TRACKING_INTERVAL` | `60` | Secondes entre deux vérifications. |
 | `TFT_ENABLED` | `false` | Active le suivi TFT. |
 | `DAILY_RECAP_CRON` | `0 8 * * *` | Horaire du récap quotidien. |
@@ -119,7 +119,12 @@ Une clé de **développement** expire toutes les 24 h. Quand elle expire, le bot
 - `/status` indique si la clé est encore acceptée ;
 - `/apikey RGAPI-…` la remplace **à chaud** — la clé est validée auprès de Riot avant d'être acceptée, puis stockée en base, donc elle survit à un redémarrage du conteneur.
 
-Une clé de production évite tout cela : pense à passer `RIOT_KEY_TIER=production` pour desserrer le limiteur.
+Attention à ne pas confondre deux choses distinctes :
+
+- **l'expiration** — une clé de *développement* meurt au bout de 24 h ; une clé *personnelle* ou de *production* est permanente ;
+- **le débit** — une clé personnelle garde le budget d'une clé de dev (20 req/s, 100 req/2 min) ; seule une clé de *production* passe à 500 req/10 s.
+
+`RIOT_KEY_TIER` n'est qu'une valeur de départ : le limiteur adopte le quota réel annoncé par Riot dans l'en-tête `X-App-Rate-Limit` dès la première réponse, et `/status` affiche le quota effectivement appliqué. Un `RIOT_KEY_TIER` mal réglé se corrige donc tout seul.
 
 ---
 
@@ -143,7 +148,7 @@ Quelques partis pris qui expliquent le reste :
 - **Tout l'état vit en base**, jamais en mémoire. Un redémarrage en pleine partie ne provoque ni double annonce ni annonce perdue : la partie est reprise et son résultat publié.
 - **La fin de partie est détectée en interrogeant le match directement** (`match-v5/{matchId}`), pas en devinant à partir de l'historique. Un match encore en cours répond 404 ; dès qu'il répond, le résultat est publié.
 - **Les LP sont projetés sur un axe absolu** (`tier × 400 + division × 100 + LP`) avant d'être soustraits. C'est ce qui rend correct le calcul d'un `Or I 92 LP → Platine IV 10 LP` (+18), là où une soustraction naïve donnerait −82. Les tiers apex (Maître, Grand Maître, Challenger) partagent le même plancher.
-- **Le limiteur de débit reproduit les fenêtres de Riot** et apprend les limites par méthode via les en-têtes `X-Method-Rate-Limit`. Un 429 met en pause l'application ou la seule méthode concernée selon `X-Rate-Limit-Type`.
+- **Le limiteur de débit reproduit les fenêtres de Riot** et apprend les quotas réels via les en-têtes `X-App-Rate-Limit` et `X-Method-Rate-Limit` : la configuration n'est qu'une amorce, corrigée dès la première réponse sans perdre le compte des requêtes déjà émises. Un 429 met en pause l'application ou la seule méthode concernée selon `X-Rate-Limit-Type`.
 - **SQLite en mode WAL** via `better-sqlite3` : écritures atomiques et transactionnelles, base intacte même après un `docker kill`.
 
 ### Base de données
@@ -167,7 +172,7 @@ Les migrations sont versionnées et jouées automatiquement au démarrage, chacu
 yarn test
 ```
 
-67 tests couvrent l'arithmétique des rangs (promotions, rétrogradations, tiers apex), les dépôts SQLite (unicité, cascade, agrégations, comptes liés pour autrui), le limiteur de débit (fenêtres, 429, limites par méthode), l'endpoint de santé et la génération des embeds — y compris le respect des limites de taille imposées par Discord.
+71 tests couvrent l'arithmétique des rangs (promotions, rétrogradations, tiers apex), les dépôts SQLite (unicité, cascade, agrégations, comptes liés pour autrui), le limiteur de débit (fenêtres, 429, apprentissage des quotas applicatifs et par méthode), l'endpoint de santé et la génération des embeds — y compris le respect des limites de taille imposées par Discord.
 
 ---
 

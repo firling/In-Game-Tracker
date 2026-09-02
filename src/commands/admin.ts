@@ -28,6 +28,20 @@ function isAdmin(interaction: ChatInputCommandInteraction, context: CommandConte
   return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
 }
 
+/** "20:1,100:120" -> "20 req/s · 100 req/2 min" */
+function formatLimit(spec: string): string {
+  const parts = spec
+    .split(',')
+    .map((part) => part.split(':').map((value) => Number.parseInt(value, 10)))
+    .filter(([count, seconds]) => Number.isFinite(count) && Number.isFinite(seconds))
+    .map(([count, seconds]) => {
+      if (seconds === 1) return `${count} req/s`;
+      if (seconds % 60 === 0) return `${count} req/${seconds / 60} min`;
+      return `${count} req/${seconds} s`;
+    });
+  return parts.length > 0 ? parts.join(' · ') : 'inconnu';
+}
+
 const RIOT_KEY_PATTERN = /^RGAPI-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const apiKeyCommand: BotCommand = {
@@ -130,6 +144,7 @@ export const statusCommand: BotCommand = {
           value: [
             `Serveur : ${context.config.riot.platform.toUpperCase()} (${context.config.riot.region})`,
             `Clé : ${context.http.keyLooksInvalid ? '❌ rejetée' : '✅ opérationnelle'}`,
+            `Quota : ${formatLimit(context.http.effectiveAppLimit(`${context.config.riot.platform}.api.riotgames.com`))}`,
             keyUpdatedAt ? `Modifiée ${timestamp(keyUpdatedAt)}` : 'Clé issue du fichier .env'
           ].join('\n'),
           inline: true

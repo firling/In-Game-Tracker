@@ -59,6 +59,14 @@ export class RiotHttpClient {
     return this.consecutiveAuthFailures >= 3;
   }
 
+  /**
+   * The application budget actually in force, once Riot's headers have been
+   * seen. Differs from the configured tier when the key's real budget does.
+   */
+  effectiveAppLimit(host: string): string {
+    return this.limiter.appLimitFor(host);
+  }
+
   async request<T>(options: RequestOptions): Promise<T | null> {
     const url = `https://${options.host}${options.path}`;
 

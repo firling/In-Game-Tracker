@@ -81,6 +81,60 @@ describe('RateLimiter', () => {
   it('ignores malformed limit headers', async () => {
     const limiter = new RateLimiter('100:1');
     limiter.observeHeaders(HOST, 'weird', { 'x-method-rate-limit': 'not-a-limit' });
+    limiter.observeHeaders(HOST, 'weird', { 'x-app-rate-limit': 'garbage' });
+    assert.equal(limiter.appLimitFor(HOST), '100:1', 'un en-tête illisible ne doit pas écraser la limite');
     await limiter.acquire(HOST, 'weird');
+  });
+
+  it('adopts the application limit advertised by Riot', async () => {
+    // Configured optimistically as a production key, but Riot reports the
+    // narrower personal-key budget.
+    const limiter = new RateLimiter('500:10,30000:600');
+    limiter.observeHeaders(HOST, 'any', { 'x-app-rate-limit': '2:1' });
+    assert.equal(limiter.appLimitFor(HOST), '2:1');
+
+    for (let i = 0; i < 2; i += 1) await limiter.acquire(HOST, 'any');
+
+    const startedAt = Date.now();
+    await limiter.acquire(HOST, 'any');
+    assert.ok(Date.now() - startedAt >= 800, 'la limite applicative réelle doit être respectée');
+  });
+
+  it('keeps counting requests already sent when the limits change', async () => {
+    const limiter = new RateLimiter('10:1');
+    // Two requests go out under the loose budget…
+    await limiter.acquire(HOST, 'any');
+    await limiter.acquire(HOST, 'any');
+
+    // …then Riot reveals the budget is only 2 per second. Those two already
+    // count, so the next one must wait rather than slipping through.
+    limiter.observeHeaders(HOST, 'any', { 'x-app-rate-limit': '2:1' });
+
+    const startedAt = Date.now();
+    await limiter.acquire(HOST, 'any');
+    assert.ok(Date.now() - startedAt >= 700, 'les requêtes déjà émises doivent rester comptabilisées');
+  });
+
+  it('does not reset the budget when the same limits are re-observed', async () => {
+    const limiter = new RateLimiter('2:1');
+    await limiter.acquire(HOST, 'any');
+    await limiter.acquire(HOST, 'any');
+    // Every response repeats the header; that must not clear the window.
+    limiter.observeHeaders(HOST, 'any', { 'x-app-rate-limit': '2:1' });
+
+    const startedAt = Date.now();
+    await limiter.acquire(HOST, 'any');
+    assert.ok(Date.now() - startedAt >= 700, 'un en-tête identique ne doit pas remettre le compteur à zéro');
+  });
+
+  it('tightens a method limit when Riot changes it', async () => {
+    const limiter = new RateLimiter('1000:1');
+    limiter.observeHeaders(HOST, 'm', { 'x-method-rate-limit': '1000:60' });
+    limiter.observeHeaders(HOST, 'm', { 'x-method-rate-limit': '2:1' });
+
+    for (let i = 0; i < 2; i += 1) await limiter.acquire(HOST, 'm');
+    const startedAt = Date.now();
+    await limiter.acquire(HOST, 'm');
+    assert.ok(Date.now() - startedAt >= 800);
   });
 });

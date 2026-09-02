@@ -2,22 +2,90 @@ import { createLogger } from '../core/logger';
 
 const log = createLogger('riot:ratelimit');
 
-/** A single "N requests per W seconds" constraint, tracked as a sliding window. */
-class SlidingWindow {
-  private readonly hits: number[] = [];
+interface Window {
+  limit: number;
+  windowMs: number;
+}
 
-  constructor(readonly limit: number, readonly windowMs: number) {}
+/**
+ * Riot advertises limits as `20:1,100:120` (count:seconds). We mirror them
+ * exactly so the client throttles itself instead of discovering the limit
+ * through 429s.
+ */
+function parseLimitSpec(spec: string): Window[] {
+  return spec
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [count, seconds] = part.split(':').map((value) => Number.parseInt(value, 10));
+      if (!Number.isFinite(count) || !Number.isFinite(seconds) || count <= 0 || seconds <= 0) return null;
+      return { limit: count, windowMs: seconds * 1000 };
+    })
+    .filter((window): window is Window => window !== null);
+}
 
-  private evict(now: number): void {
-    const cutoff = now - this.windowMs;
-    while (this.hits.length > 0 && this.hits[0] <= cutoff) this.hits.shift();
+/**
+ * One rate-limit budget: a list of request timestamps checked against every
+ * constraint that applies to it.
+ *
+ * Keeping a single timestamp list (rather than one per constraint) means the
+ * limits can be swapped at runtime — when Riot tells us the real ones — without
+ * losing track of requests already sent.
+ */
+class Bucket {
+  private spec = '';
+  private windows: Window[] = [];
+  private hits: number[] = [];
+  /** Set when Riot returns 429 — nothing in this bucket goes out until then. */
+  blockedUntil = 0;
+
+  constructor(spec: string) {
+    this.setSpec(spec);
   }
 
-  /** Milliseconds to wait before another request fits in this window. */
+  /** Returns true when the limits actually changed. */
+  setSpec(spec: string): boolean {
+    if (spec === this.spec) return false;
+    const windows = parseLimitSpec(spec);
+    if (windows.length === 0 && spec.length > 0) return false;
+    this.spec = spec;
+    this.windows = windows;
+    return true;
+  }
+
+  get currentSpec(): string {
+    return this.spec;
+  }
+
+  private prune(now: number): void {
+    const longest = this.windows.reduce((max, window) => Math.max(max, window.windowMs), 0);
+    if (longest === 0) {
+      this.hits.length = 0;
+      return;
+    }
+    const cutoff = now - longest;
+    let index = 0;
+    while (index < this.hits.length && this.hits[index] <= cutoff) index += 1;
+    if (index > 0) this.hits.splice(0, index);
+  }
+
+  /** Milliseconds to wait before another request fits every constraint. */
   delay(now: number): number {
-    this.evict(now);
-    if (this.hits.length < this.limit) return 0;
-    return this.hits[0] + this.windowMs - now + 1;
+    this.prune(now);
+
+    let delay = Math.max(0, this.blockedUntil - now);
+    for (const window of this.windows) {
+      const cutoff = now - window.windowMs;
+      // hits is sorted, so the count in this window is a suffix of the list.
+      let inWindow = 0;
+      for (let index = this.hits.length - 1; index >= 0 && this.hits[index] > cutoff; index -= 1) inWindow += 1;
+      if (inWindow < window.limit) continue;
+
+      const oldestInWindow = this.hits[this.hits.length - inWindow];
+      delay = Math.max(delay, oldestInWindow + window.windowMs - now + 1);
+    }
+    return delay;
   }
 
   record(now: number): void {
@@ -26,42 +94,10 @@ class SlidingWindow {
 }
 
 /**
- * Riot sends limits as `20:1,100:120` (count:seconds). We mirror them exactly
- * so the client throttles itself instead of discovering the limit via 429s.
+ * Bootstrap budgets, used until Riot's own headers tell us the real ones.
+ * A permanent "personal" key keeps the development budget; only a production
+ * key gets the wider one.
  */
-function parseLimitSpec(spec: string): SlidingWindow[] {
-  return spec
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const [count, seconds] = part.split(':').map((value) => Number.parseInt(value, 10));
-      if (!Number.isFinite(count) || !Number.isFinite(seconds)) return null;
-      return new SlidingWindow(count, seconds * 1000);
-    })
-    .filter((window): window is SlidingWindow => window !== null);
-}
-
-class Bucket {
-  windows: SlidingWindow[];
-  /** Set when Riot returns 429 — nothing in this bucket goes out until then. */
-  blockedUntil = 0;
-
-  constructor(spec: string) {
-    this.windows = parseLimitSpec(spec);
-  }
-
-  delay(now: number): number {
-    const penalty = Math.max(0, this.blockedUntil - now);
-    const windowDelay = this.windows.reduce((max, window) => Math.max(max, window.delay(now)), 0);
-    return Math.max(penalty, windowDelay);
-  }
-
-  record(now: number): void {
-    for (const window of this.windows) window.record(now);
-  }
-}
-
 export const DEFAULT_APP_LIMITS = {
   development: '20:1,100:120',
   production: '500:10,30000:600'
@@ -90,10 +126,6 @@ export class RateLimiter {
     return bucket;
   }
 
-  private methodBucket(key: string): Bucket | undefined {
-    return this.methodBuckets.get(key);
-  }
-
   /** Waits until a request to `host`/`method` is allowed, then reserves a slot. */
   async acquire(host: string, method: string): Promise<void> {
     const methodKey = `${host}:${method}`;
@@ -102,7 +134,7 @@ export class RateLimiter {
       for (;;) {
         const now = Date.now();
         const app = this.appBucket(host);
-        const perMethod = this.methodBucket(methodKey);
+        const perMethod = this.methodBuckets.get(methodKey);
         const delay = Math.max(app.delay(now), perMethod?.delay(now) ?? 0);
 
         if (delay <= 0) {
@@ -111,9 +143,7 @@ export class RateLimiter {
           return;
         }
 
-        if (delay > 1000) {
-          log.debug('Throttling', { host, method, waitMs: delay });
-        }
+        if (delay > 1000) log.debug('Throttling', { host, method, waitMs: delay });
         await sleep(Math.min(delay, 30_000));
       }
     });
@@ -122,16 +152,32 @@ export class RateLimiter {
     return turn;
   }
 
-  /** Learns per-method limits from response headers the first time we see them. */
+  /**
+   * Adopts the limits Riot reports on every response, for the application as a
+   * whole and for the individual endpoint. This makes the configured tier a
+   * starting guess that self-corrects on the first successful call, so a key
+   * whose real budget differs from `RIOT_KEY_TIER` still behaves correctly.
+   */
   observeHeaders(host: string, method: string, headers: Record<string, unknown>): void {
-    const spec = headers['x-method-rate-limit'];
-    if (typeof spec !== 'string' || spec.length === 0) return;
+    const appSpec = headers['x-app-rate-limit'];
+    if (typeof appSpec === 'string' && appSpec.length > 0) {
+      const bucket = this.appBucket(host);
+      const previous = bucket.currentSpec;
+      if (bucket.setSpec(appSpec)) {
+        log.info('Limite applicative alignée sur Riot', { host, avant: previous, apres: appSpec });
+      }
+    }
 
-    const key = `${host}:${method}`;
-    const existing = this.methodBuckets.get(key);
-    if (!existing) {
-      this.methodBuckets.set(key, new Bucket(spec));
-      log.debug('Limite de méthode apprise', { method, spec });
+    const methodSpec = headers['x-method-rate-limit'];
+    if (typeof methodSpec === 'string' && methodSpec.length > 0) {
+      const key = `${host}:${method}`;
+      const bucket = this.methodBuckets.get(key);
+      if (!bucket) {
+        this.methodBuckets.set(key, new Bucket(methodSpec));
+        log.debug('Limite de méthode apprise', { method, spec: methodSpec });
+      } else if (bucket.setSpec(methodSpec)) {
+        log.debug('Limite de méthode mise à jour', { method, spec: methodSpec });
+      }
     }
   }
 
@@ -147,6 +193,11 @@ export class RateLimiter {
       this.appBucket(host).blockedUntil = until;
     }
     log.warn('429 reçu — mise en pause', { host, method, scope: scope ?? 'application', retryAfterSeconds });
+  }
+
+  /** Current effective application budget for a host, for diagnostics. */
+  appLimitFor(host: string): string {
+    return this.appBuckets.get(host)?.currentSpec ?? this.appLimitSpec;
   }
 }
 
