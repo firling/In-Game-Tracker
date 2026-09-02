@@ -31,3 +31,8 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+# Test build output
+.test-build/
+
+# Local data
+data/

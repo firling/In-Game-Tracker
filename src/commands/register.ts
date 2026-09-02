@@ -1,69 +1,213 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
-import RiotApiService from '../services/riotApi';
-import { db } from '../database';
+import { EmbedBuilder, MessageFlags, SlashCommandBuilder } from 'discord.js';
+import { createLogger } from '../core/logger';
+import * as accountsRepo from '../db/repositories/accounts';
+import { formatDivision, lpProgressBar, tierColor, tierEmblemUrl, winRate } from '../domain/rank';
+import { isPlatform, PLATFORMS } from '../riot/constants';
+import { RiotApiError } from '../riot/http';
+import type { LeagueEntryDto } from '../riot/types';
+import { profileButtons } from '../ui/components';
+import { opggUrl, percent, riotId } from '../ui/format';
+import { COLORS, EMOJI } from '../ui/theme';
+import type { BotCommand } from './types';
 
-export const data = new SlashCommandBuilder()
-  .setName('register')
-  .setDescription('Register your League of Legends account for tracking')
-  .addStringOption(option =>
-    option.setName('riot-id')
-      .setDescription('Your Riot ID (e.g., PlayerName#EUW)')
-      .setRequired(true)
-  );
+const log = createLogger('cmd:register');
 
-export async function execute(interaction: ChatInputCommandInteraction, riotApi: RiotApiService) {
-  await interaction.deferReply({ ephemeral: true });
+/** Guard rail: each extra account costs a spectator call every poll cycle. */
+const MAX_ACCOUNTS_PER_USER = 8;
 
-  const riotId = interaction.options.getString('riot-id', true);
-  const parts = riotId.split('#');
+export const registerCommand: BotCommand = {
+  data: new SlashCommandBuilder()
+    .setName('register')
+    .setDescription('Enregistre un compte League of Legends pour le suivi automatique')
+    .addStringOption((option) =>
+      option
+        .setName('riot-id')
+        .setDescription('Ton Riot ID complet, par exemple Faker#KR1')
+        .setRequired(true)
+        .setMaxLength(50)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('serveur')
+        .setDescription('Serveur du compte (par défaut celui du bot)')
+        .addChoices(
+          { name: 'EUW', value: 'euw1' },
+          { name: 'EUNE', value: 'eun1' },
+          { name: 'NA', value: 'na1' },
+          { name: 'KR', value: 'kr' },
+          { name: 'BR', value: 'br1' },
+          { name: 'TR', value: 'tr1' }
+        )
+    ),
 
-  if (parts.length !== 2) {
-    await interaction.editReply('❌ Invalid Riot ID format. Please use: GameName#TagLine (e.g., PlayerName#EUW)');
-    return;
+  async execute(interaction, context) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const raw = interaction.options.getString('riot-id', true).trim();
+    const parsed = parseRiotId(raw);
+    if (!parsed) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            'Riot ID invalide',
+            'Le format attendu est `Pseudo#TAG`.\nExemples : `Faker#KR1`, `Mon Pseudo#EUW`.'
+          )
+        ]
+      });
+      return;
+    }
+
+    const requestedPlatform = interaction.options.getString('serveur');
+    const platform =
+      requestedPlatform && isPlatform(requestedPlatform) ? requestedPlatform : context.config.riot.platform;
+
+    if (accountsRepo.countForUser(interaction.user.id) >= MAX_ACCOUNTS_PER_USER) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            'Limite atteinte',
+            `Tu suis déjà ${MAX_ACCOUNTS_PER_USER} comptes. Retires-en un avec **/unregister** avant d’en ajouter un autre.`
+          )
+        ]
+      });
+      return;
+    }
+
+    try {
+      const account = await context.api.getAccountByRiotId(parsed.gameName, parsed.tagLine);
+      if (!account) {
+        await interaction.editReply({
+          embeds: [
+            errorEmbed(
+              'Compte introuvable',
+              `Riot ne connaît pas **${riotId(parsed.gameName, parsed.tagLine)}**.\n` +
+                `Vérifie l’orthographe et le tag (visible en haut de ton client LoL).`
+            )
+          ]
+        });
+        return;
+      }
+
+      const result = accountsRepo.addAccount({
+        discordUserId: interaction.user.id,
+        gameName: account.gameName,
+        tagLine: account.tagLine,
+        puuid: account.puuid,
+        platform
+      });
+
+      if (!result.ok) {
+        const owner = result.account.discordUserId;
+        await interaction.editReply({
+          embeds: [
+            errorEmbed(
+              'Compte déjà suivi',
+              owner === interaction.user.id
+                ? `**${riotId(account.gameName, account.tagLine)}** est déjà enregistré sur ton compte Discord.`
+                : `**${riotId(account.gameName, account.tagLine)}** est déjà suivi par <@${owner}>.`
+            )
+          ]
+        });
+        return;
+      }
+
+      const entries = await safeEntries(context, account.puuid);
+      const solo = entries.find((entry) => entry.queueType === 'RANKED_SOLO_5x5') ?? null;
+      const flex = entries.find((entry) => entry.queueType === 'RANKED_FLEX_SR') ?? null;
+
+      const embed = new EmbedBuilder()
+        .setColor(solo ? tierColor(solo.tier) : COLORS.victory)
+        .setAuthor({ name: 'Compte enregistré', iconURL: tierEmblemUrl(solo?.tier) })
+        .setTitle(riotId(account.gameName, account.tagLine))
+        .setDescription(
+          `Le suivi est actif. Tes parties classées **Solo/Duo** et **Flex** seront annoncées automatiquement.\n` +
+            `[Voir sur op.gg](${opggUrl(account.gameName, account.tagLine, platform)})`
+        )
+        .addFields(
+          { name: '👤 Solo/Duo', value: rankSummary(solo), inline: true },
+          { name: '👥 Flex', value: rankSummary(flex), inline: true },
+          { name: '🌍 Serveur', value: platform.toUpperCase(), inline: true }
+        )
+        .setThumbnail(tierEmblemUrl(solo?.tier))
+        .setFooter({ text: 'Astuce : /profile pour tes stats, /leaderboard pour le classement du serveur' })
+        .setTimestamp();
+
+      await interaction.editReply({
+        embeds: [embed],
+        components: profileButtons({
+          accountId: result.account.id,
+          discordUserId: interaction.user.id,
+          gameName: account.gameName,
+          tagLine: account.tagLine,
+          platform
+        })
+      });
+
+      log.info('Compte enregistré', {
+        discordUserId: interaction.user.id,
+        account: riotId(account.gameName, account.tagLine),
+        platform
+      });
+    } catch (error) {
+      log.error('Échec de /register', error);
+      await interaction.editReply({ embeds: [riotErrorEmbed(error)] });
+    }
   }
+};
 
-  const [gameName, tagLine] = parts;
+/** Splits on the LAST '#' so pseudos containing '#' still parse. */
+export function parseRiotId(input: string): { gameName: string; tagLine: string } | null {
+  const separator = input.lastIndexOf('#');
+  if (separator <= 0 || separator === input.length - 1) return null;
 
+  const gameName = input.slice(0, separator).trim();
+  const tagLine = input.slice(separator + 1).trim();
+  if (gameName.length < 3 || gameName.length > 16) return null;
+  if (tagLine.length < 2 || tagLine.length > 5) return null;
+  return { gameName, tagLine };
+}
+
+function rankSummary(entry: LeagueEntryDto | null): string {
+  if (!entry) return 'Non classé';
+  const bar = lpProgressBar(entry, 6);
+  return [
+    `**${formatDivision(entry.tier, entry.rank)}**`,
+    `${entry.leaguePoints} LP`,
+    bar,
+    `${entry.wins}V ${entry.losses}D · ${percent(winRate(entry.wins, entry.losses), 1)}`
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function safeEntries(
+  context: { api: { getLeagueEntries(puuid: string): Promise<LeagueEntryDto[]> } },
+  puuid: string
+): Promise<LeagueEntryDto[]> {
   try {
-    // Get account info from Riot API
-    const account = await riotApi.getAccountByRiotId(gameName, tagLine);
-    if (!account) {
-      await interaction.editReply('❌ Account not found. Please check your Riot ID and try again.');
-      return;
-    }
-
-    // Add to database
-    const registeredAccount = db.addAccount(
-      interaction.user.id,
-      account.gameName,
-      account.tagLine,
-      account.puuid
-    );
-
-    if (!registeredAccount) {
-      await interaction.editReply('❌ This account is already registered!');
-      return;
-    }
-
-    // Get rank info
-    const leagueEntries = await riotApi.getLeagueEntries(account.puuid);
-    const soloQueue = leagueEntries.find(e => e.queueType === 'RANKED_SOLO_5x5');
-    const flexQueue = leagueEntries.find(e => e.queueType === 'RANKED_FLEX_SR');
-
-    let rankInfo = '';
-    if (soloQueue) {
-      rankInfo += `\n👤 **Solo/Duo:** ${soloQueue.tier} ${soloQueue.rank} (${soloQueue.leaguePoints} LP)`;
-    }
-    if (flexQueue) {
-      rankInfo += `\n👥 **Flex:** ${flexQueue.tier} ${flexQueue.rank} (${flexQueue.leaguePoints} LP)`;
-    }
-
-    await interaction.editReply(
-      `✅ Successfully registered **${account.gameName}#${account.tagLine}**!${rankInfo}\n\n` +
-      `Your games will now be tracked automatically!`
-    );
-  } catch (error) {
-    console.error('Error in register command:', error);
-    await interaction.editReply('❌ An error occurred while registering your account. Please try again later.');
+    return await context.api.getLeagueEntries(puuid);
+  } catch {
+    return [];
   }
 }
+
+export function errorEmbed(title: string, description: string): EmbedBuilder {
+  return new EmbedBuilder().setColor(COLORS.defeat).setTitle(`${EMOJI.defeat} ${title}`).setDescription(description);
+}
+
+export function riotErrorEmbed(error: unknown): EmbedBuilder {
+  if (error instanceof RiotApiError) {
+    if (error.status === 403 || error.status === 401) {
+      return errorEmbed(
+        'Clé API Riot expirée',
+        'Le bot ne peut plus interroger Riot. Un administrateur doit la renouveler avec **/apikey**.'
+      );
+    }
+    if (error.status === 429) {
+      return errorEmbed('Trop de requêtes', 'Le quota Riot est saturé. Réessaie dans une minute.');
+    }
+  }
+  return errorEmbed('Erreur', 'Une erreur est survenue. Réessaie dans un instant.');
+}
+
+export const SUPPORTED_PLATFORMS = PLATFORMS;

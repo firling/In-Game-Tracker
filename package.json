@@ -1,35 +1,40 @@
 {
   "name": "in-game-tracker",
-  "version": "1.0.0",
-  "description": "Discord bot to track League of Legends games",
+  "version": "2.0.0",
+  "description": "Discord bot that tracks League of Legends games, ranks and LP for your server",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "watch": "tsc -w",
-    "migrate-puuids": "node dist/scripts/migratePuuids.js"
+    "dev": "ts-node --transpile-only src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --outDir .test-build && node --test \".test-build/**/*.test.js\"",
+    "watch": "tsc -w"
   },
   "keywords": [
     "discord",
     "bot",
     "league-of-legends",
+    "riot",
     "tracker"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
-    "@types/sql.js": "^1.4.9",
-    "axios": "^1.6.7",
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.4.5",
-    "node-cron": "^3.0.3",
-    "sql.js": "^1.13.0"
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.23.2",
+    "dotenv": "^16.4.7",
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
-    "@types/node": "^20.11.19",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
     "@types/node-cron": "^3.0.11",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.7.3"
   }
 }

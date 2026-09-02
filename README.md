@@ -1,153 +1,164 @@
-# In-Game Tracker - Discord Bot
+# In-Game Tracker
 
-Bot Discord pour tracker automatiquement les parties League of Legends de ton serveur.
+Bot Discord qui suit les parties classées **League of Legends** (et **TFT**, optionnel) des membres de ton serveur, et publie automatiquement le début et la fin de chaque partie avec le KDA, le farm et les LP gagnés ou perdus.
 
-## 🎯 Fonctionnalités
+---
 
-- ✅ Enregistrement de plusieurs comptes LoL par utilisateur Discord
-- 🎮 Notifications automatiques lors du début d'une partie (Ranked Solo/Duo & Flex)
-- 📊 Notifications de fin de partie avec KDA, résultat, et LP gagné/perdu
-- 📅 Récapitulatif quotidien à 8h du matin des gains/pertes de LP des dernières 24h
-- 🔍 Commande `/stats` pour voir ses comptes enregistrés et son classement
+## Fonctionnalités
 
-## 📋 Prérequis
+- **Annonce de début de partie** — champion, rang actuel, bilan de la saison, lien *spectate*.
+- **Annonce de fin de partie** — victoire / défaite / remake, KDA, CS par minute, dégâts, vision, variation de LP et barre de progression dans la division.
+- **Annonces groupées** — quand plusieurs membres jouent ensemble, une seule annonce. S'ils s'affrontent, l'embed sépare les deux camps.
+- **Promotions et rétrogradations** mises en avant en tête d'annonce.
+- **Récapitulatif automatique** quotidien, plus `/recap` à la demande sur 24 h, 7 ou 30 jours.
+- **Classements** par rang ou par LP gagnés sur une période.
+- **Historique** des parties suivies, stocké localement.
+- **Rotation de la clé API Riot** en une commande, sans redémarrage ni perte de données.
 
-- Node.js v18 ou supérieur
-- Un bot Discord ([créer un bot](https://discord.com/developers/applications))
-- Une clé API Riot Games ([obtenir une clé](https://developer.riotgames.com/))
+### Ce que le bot ne fait pas
 
-## 🚀 Installation
+- Il ne suit que les files **Classée Solo/Duo** et **Classée Flex** (normales, ARAM et Arena sont ignorées).
+- L'historique ne contient que les parties observées en direct par le bot : rien n'est importé rétroactivement.
 
-1. **Clone le projet**
-```bash
-git clone <url-du-repo>
-cd in-game-tracker
-```
+---
 
-2. **Installe les dépendances**
-```bash
-npm install
-```
+## Commandes
 
-3. **Configure les variables d'environnement**
+| Commande | Description |
+|---|---|
+| `/register <riot-id> [serveur]` | Enregistre un compte (`Faker#KR1`). Jusqu'à 8 comptes par membre. |
+| `/unregister <compte>` | Retire un compte du suivi (autocomplétion sur tes propres comptes). |
+| `/profile [membre] [public]` | Rangs, LP et winrate des comptes suivis. |
+| `/history [membre] [nombre] [public]` | Les dernières parties suivies, avec LP et KDA. |
+| `/leaderboard [type]` | Classement du serveur : par rang (Solo/Duo, Flex) ou par LP gagnés (24 h, 7 j, 30 j). |
+| `/recap [periode]` | Bilan collectif sur 24 h, 7 ou 30 jours. |
+| `/status` | État de santé du bot *(administrateurs)*. |
+| `/apikey <cle>` | Renouvelle la clé API Riot *(administrateurs)*. |
+| `/help` | Aide intégrée. |
 
-Crée un fichier `.env` à la racine du projet :
+Les commandes de consultation répondent en privé par défaut ; ajoute `public: true` pour partager la réponse dans le salon.
 
-```env
-# Discord Bot Token (depuis https://discord.com/developers/applications)
-DISCORD_TOKEN=ton_token_discord
+---
 
-# Discord Client ID (Application ID)
-DISCORD_CLIENT_ID=ton_client_id
+## Installation
 
-# Discord Server ID (clic droit sur ton serveur > Copier l'identifiant)
-DISCORD_GUILD_ID=ton_server_id
+### Prérequis
 
-# Riot Games API Key (depuis https://developer.riotgames.com/)
-RIOT_API_KEY=ta_clé_api_riot
+- Node.js 20+ (ou Docker)
+- Un bot Discord — [portail développeur](https://discord.com/developers/applications)
+- Une clé API Riot — [developer.riotgames.com](https://developer.riotgames.com/)
 
-# Channel ID pour les notifications (clic droit sur le canal > Copier l'identifiant)
-NOTIFICATION_CHANNEL_ID=ton_channel_id
+### Configuration du bot Discord
 
-# Intervalle de vérification en secondes (60 = 1 minute)
-TRACKING_INTERVAL=60
-```
+1. **Bot** → *Reset Token* pour récupérer `DISCORD_TOKEN`.
+2. **OAuth2 → URL Generator** → scopes `bot` + `applications.commands`.
+3. Permissions : `Send Messages`, `Embed Links`, `Use External Emojis`, `Read Message History`.
+4. Invite le bot, puis récupère l'ID du salon d'annonces (clic droit → *Copier l'identifiant*, mode développeur activé).
 
-4. **Configure ton bot Discord**
+Aucun *privileged intent* n'est nécessaire : le bot n'utilise que `Guilds`.
 
-Sur le [portail développeur Discord](https://discord.com/developers/applications) :
-- Va dans "Bot" → Active "MESSAGE CONTENT INTENT"
-- Va dans "OAuth2" → "URL Generator"
-- Sélectionne les scopes : `bot`, `applications.commands`
-- Permissions : `Send Messages`, `Embed Links`, `Read Message History`
-- Utilise l'URL générée pour inviter le bot sur ton serveur
-
-5. **Compile et lance le bot**
+### Démarrage
 
 ```bash
-# Compilation TypeScript
-npm run build
-
-# Lancement du bot
-npm start
-
-# Ou pour le développement (avec rechargement auto)
-npm run dev
+cp .env.example .env   # puis renseigne les variables
+yarn install
+yarn build
+yarn start
 ```
 
-## 📝 Commandes Discord
+En développement : `yarn dev` (TypeScript à la volée), `yarn test`, `yarn typecheck`.
 
-### `/register <riot-id>`
-Enregistre ton compte LoL pour le tracking.
-- **Exemple :** `/register Faker#KR1`
-- Tu peux enregistrer plusieurs comptes
+### Docker
 
-### `/unregister <riot-id>`
-Supprime un compte du tracking.
-- **Exemple :** `/unregister Faker#KR1`
-
-### `/stats`
-Affiche tes comptes enregistrés et leurs statistiques ranked.
-- Montre le niveau, classement Solo/Duo et Flex, winrate
-
-## 🔧 Structure du projet
-
-```
-in-game-tracker/
-├── src/
-│   ├── commands/          # Commandes slash Discord
-│   │   ├── register.ts    # Commande /register
-│   │   ├── unregister.ts  # Commande /unregister
-│   │   └── stats.ts       # Commande /stats
-│   ├── services/          # Services métier
-│   │   ├── riotApi.ts     # Gestion API Riot Games
-│   │   ├── tracker.ts     # Système de tracking des parties
-│   │   └── dailyRecap.ts  # Récapitulatif quotidien
-│   ├── database/          # Gestion base de données SQLite
-│   │   └── index.ts       # Manager de la base de données
-│   ├── utils/             # Utilitaires
-│   │   └── embeds.ts      # Création des embeds Discord
-│   ├── types/             # Types TypeScript
-│   │   └── index.ts       # Définitions de types
-│   └── index.ts           # Point d'entrée principal
-├── package.json           # Dépendances npm
-├── tsconfig.json          # Configuration TypeScript
-└── .env                   # Variables d'environnement
+```bash
+cp .env.example .env   # puis renseigne les variables
+docker compose up -d --build
+docker compose logs -f
 ```
 
-## 🎮 Comment ça fonctionne ?
+La base SQLite est montée dans `./data` et survit aux reconstructions. Le conteneur expose `/health` sur le port 3000 et est marqué *unhealthy* si Discord est déconnecté ou si la clé Riot est rejetée.
 
-1. **Tracking automatique** : Le bot vérifie toutes les 60 secondes (configurable) si les joueurs enregistrés sont en partie
-2. **Début de partie** : Envoie un embed avec le champion et le mode de jeu
-3. **Fin de partie** : Envoie un embed détaillé avec KDA, durée, résultat, LP
-4. **Récap quotidien** : À 8h, résume les performances des dernières 24h pour tous les joueurs
+---
 
-## 📊 Base de données
+## Configuration
 
-Le bot utilise SQLite avec 3 tables :
-- `accounts` : Comptes LoL enregistrés
-- `tracked_games` : Historique des parties trackées
-- `league_snapshots` : Snapshots du classement pour le récap quotidien
+Toutes les variables sont documentées dans [`.env.example`](.env.example). Les principales :
 
-## ⚠️ Limitations
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `DISCORD_TOKEN` | — | **Requis.** Token du bot. |
+| `DISCORD_CLIENT_ID` | — | **Requis.** Application ID. |
+| `DISCORD_GUILD_ID` | — | Publication instantanée des commandes sur ce serveur. Vide → publication globale (≈ 1 h). |
+| `NOTIFICATION_CHANNEL_ID` | — | **Requis.** Salon des annonces. |
+| `RIOT_API_KEY` | — | **Requis.** Clé de démarrage ; `/apikey` la remplace ensuite en base. |
+| `RIOT_PLATFORM` | `euw1` | Serveur Riot (`euw1`, `na1`, `kr`, `br1`…). |
+| `RIOT_KEY_TIER` | `development` | Calibre le limiteur de débit (`development` ou `production`). |
+| `TRACKING_INTERVAL` | `60` | Secondes entre deux vérifications. |
+| `TFT_ENABLED` | `false` | Active le suivi TFT. |
+| `DAILY_RECAP_CRON` | `0 8 * * *` | Horaire du récap quotidien. |
+| `ADMIN_USER_IDS` | — | IDs autorisés sur `/apikey` et `/status`, en plus des administrateurs du serveur. |
+| `HEALTH_PORT` | `3000` | Endpoint `/health`. `0` pour le désactiver. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. |
 
-- La clé API Riot gratuite a des limites de requêtes (20 req/sec, 100 req/2min)
-- Le bot ne track que les parties classées (Solo/Duo et Flex)
-- Les données de champions sont simplifiées (tu peux améliorer avec Data Dragon)
+### Clé API Riot
 
-## 🛠️ Améliorations possibles
+Une clé de **développement** expire toutes les 24 h. Quand elle expire, le bot cesse silencieusement de voir les parties. Deux réflexes :
 
-- Ajouter Data Dragon pour les noms/images de champions
-- Supporter d'autres régions que EUW
-- Ajouter un système de profil avec graphiques
-- Historique des parties avec filtres
-- Notifications personnalisables par utilisateur
-- Support des parties normales/ARAM
+- `/status` indique si la clé est encore acceptée ;
+- `/apikey RGAPI-…` la remplace **à chaud** — la clé est validée auprès de Riot avant d'être acceptée, puis stockée en base, donc elle survit à un redémarrage du conteneur.
 
-## 📄 Licence
+Une clé de production évite tout cela : pense à passer `RIOT_KEY_TIER=production` pour desserrer le limiteur.
+
+---
+
+## Architecture
+
+```
+src/
+├── commands/     Commandes slash (une par fichier) + registre
+├── config/       Lecture et validation de l'environnement
+├── core/         Logger, cache TTL, utilitaires asynchrones
+├── db/           Connexion SQLite, migrations versionnées, dépôts
+├── domain/       Arithmétique des rangs (LP absolus, promotions)
+├── riot/         Client HTTP, limiteur de débit, endpoints LoL/TFT, Data Dragon
+├── services/     Notifications Discord, récap, endpoint de santé
+├── trackers/     Boucles de suivi LoL et TFT
+└── ui/           Thème, formatage, embeds, composants
+```
+
+Quelques partis pris qui expliquent le reste :
+
+- **Tout l'état vit en base**, jamais en mémoire. Un redémarrage en pleine partie ne provoque ni double annonce ni annonce perdue : la partie est reprise et son résultat publié.
+- **La fin de partie est détectée en interrogeant le match directement** (`match-v5/{matchId}`), pas en devinant à partir de l'historique. Un match encore en cours répond 404 ; dès qu'il répond, le résultat est publié.
+- **Les LP sont projetés sur un axe absolu** (`tier × 400 + division × 100 + LP`) avant d'être soustraits. C'est ce qui rend correct le calcul d'un `Or I 92 LP → Platine IV 10 LP` (+18), là où une soustraction naïve donnerait −82. Les tiers apex (Maître, Grand Maître, Challenger) partagent le même plancher.
+- **Le limiteur de débit reproduit les fenêtres de Riot** et apprend les limites par méthode via les en-têtes `X-Method-Rate-Limit`. Un 429 met en pause l'application ou la seule méthode concernée selon `X-Rate-Limit-Type`.
+- **SQLite en mode WAL** via `better-sqlite3` : écritures atomiques et transactionnelles, base intacte même après un `docker kill`.
+
+### Base de données
+
+| Table | Contenu |
+|---|---|
+| `accounts` | Comptes Riot enregistrés, un PUUID ne peut être suivi qu'une fois. |
+| `tracked_games` | Une ligne par joueur et par partie : état, rang avant/après, statistiques finales. |
+| `league_snapshots` | Photos du classement, écrites uniquement en cas de changement. |
+| `tracked_tft_games`, `tft_league_snapshots` | Équivalents TFT. |
+| `settings` | Configuration modifiable à chaud (clé API). |
+| `schema_migrations` | Migrations appliquées. |
+
+Les migrations sont versionnées et jouées automatiquement au démarrage, chacune dans sa transaction.
+
+---
+
+## Tests
+
+```bash
+yarn test
+```
+
+62 tests couvrent l'arithmétique des rangs (promotions, rétrogradations, tiers apex), les dépôts SQLite (unicité, cascade, agrégations), le limiteur de débit (fenêtres, 429, limites par méthode), l'endpoint de santé et la génération des embeds — y compris le respect des limites de taille imposées par Discord.
+
+---
+
+## Licence
 
 MIT
-
-## 🤝 Contribution
-
-Les contributions sont les bienvenues ! N'hésite pas à ouvrir une issue ou une PR.

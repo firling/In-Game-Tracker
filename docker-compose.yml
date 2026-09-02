@@ -1,23 +1,38 @@
-version: "3.8"
-
 services:
   bot:
     build: .
+    image: in-game-tracker:latest
     container_name: in-game-tracker
     restart: unless-stopped
+    init: true
     env_file:
       - .env
-    volumes:
-      # Persist database
-      - ./data:/app/data
     environment:
-      - NODE_ENV=production
-    # Optional: resource limits
+      NODE_ENV: production
+      DATA_DIR: /app/data
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      # SQLite database (WAL files included) — survives rebuilds.
+      - ./data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 60s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
           cpus: "1"
           memory: 512M
         reservations:
-          cpus: "0.5"
-          memory: 256M
+          memory: 128M
