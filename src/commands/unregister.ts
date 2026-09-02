@@ -21,16 +21,22 @@ export const unregisterCommand: BotCommand = {
         .setMaxLength(50)
     ),
 
-  /** Suggests only the caller's own accounts, so the value is always valid. */
+  /**
+   * Suggests what the caller may actually remove: their own accounts, plus the
+   * ones they linked to someone else.
+   */
   async autocomplete(interaction) {
     const typed = interaction.options.getFocused().toLowerCase();
-    const accounts = accountsRepo.findByDiscordUser(interaction.user.id);
+    const accounts = accountsRepo.findManageableBy(interaction.user.id);
 
     const choices = accounts
-      .map((account) => riotId(account.gameName, account.tagLine))
-      .filter((name) => name.toLowerCase().includes(typed))
-      .slice(0, 25)
-      .map((name) => ({ name, value: name }));
+      .map((account) => {
+        const value = riotId(account.gameName, account.tagLine);
+        const linkedToSomeoneElse = account.discordUserId !== interaction.user.id;
+        return { name: linkedToSomeoneElse ? `${value} (lié à un autre membre)` : value, value };
+      })
+      .filter((choice) => choice.value.toLowerCase().includes(typed))
+      .slice(0, 25);
 
     await interaction.respond(choices).catch(() => undefined);
   },
@@ -38,8 +44,9 @@ export const unregisterCommand: BotCommand = {
   async execute(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const input = interaction.options.getString('compte', true).trim();
-    const accounts = accountsRepo.findByDiscordUser(interaction.user.id);
+    // Autocomplete appends a hint to the label; the user may send it verbatim.
+    const input = interaction.options.getString('compte', true).replace(/\s*\(lié à un autre membre\)$/, '').trim();
+    const accounts = accountsRepo.findManageableBy(interaction.user.id);
 
     if (accounts.length === 0) {
       await interaction.editReply({
@@ -64,8 +71,14 @@ export const unregisterCommand: BotCommand = {
         embeds: [
           errorEmbed(
             'Compte introuvable',
-            `**${input}** ne fait pas partie de tes comptes suivis.\n\n` +
-              `Tes comptes :\n${accounts.map((a) => `• ${riotId(a.gameName, a.tagLine)}`).join('\n')}`
+            `**${input}** ne fait pas partie des comptes que tu peux retirer.\n\n` +
+              `Tu peux retirer :\n${accounts
+                .map(
+                  (a) =>
+                    `• ${riotId(a.gameName, a.tagLine)}` +
+                    (a.discordUserId === interaction.user.id ? '' : ` — lié à <@${a.discordUserId}>`)
+                )
+                .join('\n')}`
           )
         ]
       });
@@ -78,7 +91,12 @@ export const unregisterCommand: BotCommand = {
       return;
     }
 
-    log.info('Compte retiré', { discordUserId: interaction.user.id, account: riotId(target.gameName, target.tagLine) });
+    const belongedToSomeoneElse = target.discordUserId !== interaction.user.id;
+    log.info('Compte retiré', {
+      parQui: interaction.user.id,
+      proprietaire: target.discordUserId,
+      account: riotId(target.gameName, target.tagLine)
+    });
 
     await interaction.editReply({
       embeds: [
@@ -86,8 +104,10 @@ export const unregisterCommand: BotCommand = {
           .setColor(COLORS.warning)
           .setTitle('Compte retiré')
           .setDescription(
-            `**${riotId(target.gameName, target.tagLine)}** n’est plus suivi, et son historique a été effacé.\n` +
-              `Tu peux le réenregistrer à tout moment avec **/register**.`
+            `**${riotId(target.gameName, target.tagLine)}**` +
+              (belongedToSomeoneElse ? `, lié à <@${target.discordUserId}>,` : '') +
+              ` n’est plus suivi, et son historique a été effacé.\n` +
+              `Il peut être réenregistré à tout moment avec **/register**.`
           )
       ]
     });

@@ -263,6 +263,7 @@ describe('list embeds', () => {
       tagLine: 'EUW',
       puuid: `p${index}`,
       platform: 'euw1',
+      registeredBy: `10000000000000${index.toString().padStart(3, '0')}`,
       createdAt: Date.now()
     };
   }

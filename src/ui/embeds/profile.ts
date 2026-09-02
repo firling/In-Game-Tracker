@@ -55,10 +55,12 @@ export function profileEmbed(target: User, accounts: AccountRanks[]): EmbedBuild
 
   for (const item of accounts.slice(0, 20)) {
     const name = riotId(item.account.gameName, item.account.tagLine);
+    const addedBySomeoneElse = item.account.registeredBy !== item.account.discordUserId;
     const value = [
       queueBlock('👤', 'Solo/Duo', item.solo),
       queueBlock('👥', 'Flex', item.flex),
-      `[op.gg](${opggUrl(item.account.gameName, item.account.tagLine, item.account.platform)})`
+      `[op.gg](${opggUrl(item.account.gameName, item.account.tagLine, item.account.platform)})` +
+        (addedBySomeoneElse ? ` · lié par <@${item.account.registeredBy}>` : '')
     ].join('\n');
 
     embed.addFields({ name, value: clamp(value, 1024), inline: false });

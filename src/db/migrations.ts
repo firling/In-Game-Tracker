@@ -127,5 +127,16 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_tft_snapshots_lookup
         ON tft_league_snapshots(account_id, queue_type, captured_at DESC);
     `
+  },
+  {
+    version: 3,
+    name: 'account_registered_by',
+    sql: `
+      -- Who ran /register. Differs from discord_user_id when a member links an
+      -- account on someone else's behalf, and lets that person undo it.
+      ALTER TABLE accounts ADD COLUMN registered_by TEXT;
+      UPDATE accounts SET registered_by = discord_user_id WHERE registered_by IS NULL;
+      CREATE INDEX idx_accounts_registered_by ON accounts(registered_by);
+    `
   }
 ];

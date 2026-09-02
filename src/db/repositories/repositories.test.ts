@@ -21,13 +21,14 @@ after(() => {
   fs.rmSync(workDir, { recursive: true, force: true });
 });
 
-function newAccount(suffix: string, discordUserId = '100000000000000001') {
+function newAccount(suffix: string, discordUserId = '100000000000000001', registeredBy?: string) {
   const result = accountsRepo.addAccount({
     discordUserId,
     gameName: `Player${suffix}`,
     tagLine: 'EUW',
     puuid: `puuid-${suffix}`,
-    platform: 'euw1'
+    platform: 'euw1',
+    registeredBy
   });
   assert.equal(result.ok, true);
   return result.ok ? result.account : (undefined as never);
@@ -68,6 +69,56 @@ describe('accounts repository', () => {
     const updated = accountsRepo.findById(account.id);
     assert.equal(updated?.gameName, 'NewName');
     assert.equal(updated?.tagLine, 'NEW');
+  });
+
+  it('defaults the registrar to the owner for self-registration', () => {
+    const account = newAccount('self');
+    assert.equal(account.registeredBy, account.discordUserId);
+  });
+
+  it('records who linked an account on someone else’s behalf', () => {
+    const friend = '100000000000000042';
+    const registrar = '100000000000000001';
+    const account = newAccount('friend', friend, registrar);
+
+    assert.equal(account.discordUserId, friend, 'le compte appartient à l’ami — c’est lui qui sera mentionné');
+    assert.equal(account.registeredBy, registrar);
+
+    // The friend sees it among their own accounts…
+    assert.equal(accountsRepo.findByDiscordUser(friend).some((a) => a.id === account.id), true);
+    // …and it counts against the friend's quota, not the registrar's.
+    assert.equal(accountsRepo.countForUser(friend), 1);
+  });
+
+  it('lets both the owner and the registrar remove a linked account', () => {
+    const friend = '100000000000000043';
+    const registrar = '100000000000000044';
+    const linked = newAccount('linked', friend, registrar);
+    const own = newAccount('own', registrar, registrar);
+
+    const registrarCanManage = accountsRepo.findManageableBy(registrar).map((a) => a.id);
+    assert.ok(registrarCanManage.includes(linked.id), 'le parrain peut défaire son ajout');
+    assert.ok(registrarCanManage.includes(own.id));
+
+    const ownerCanManage = accountsRepo.findManageableBy(friend).map((a) => a.id);
+    assert.ok(ownerCanManage.includes(linked.id), 'le propriétaire peut se retirer');
+    assert.equal(ownerCanManage.includes(own.id), false, 'mais pas toucher au compte du parrain');
+  });
+
+  it('does not let a third party manage someone else’s account', () => {
+    const stranger = '100000000000000045';
+    newAccount('stranger-target', '100000000000000046', '100000000000000047');
+    assert.equal(accountsRepo.findManageableBy(stranger).length, 0);
+  });
+
+  it('lists only accounts linked for others as registered-for-others', () => {
+    const registrar = '100000000000000048';
+    newAccount('rfo-self', registrar, registrar);
+    const linked = newAccount('rfo-other', '100000000000000049', registrar);
+
+    const forOthers = accountsRepo.findRegisteredForOthers(registrar);
+    assert.equal(forOthers.length, 1);
+    assert.equal(forOthers[0].id, linked.id);
   });
 
   it('cascades the deletion to tracked games', () => {

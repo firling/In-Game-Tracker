@@ -18,6 +18,8 @@ export const helpCommand: BotCommand = {
           name: '🚀 Démarrer',
           value: [
             '**/register** `Pseudo#TAG` — enregistre ton compte',
+            '**/register** `Pseudo#TAG` `membre:@Pote` — lie un compte à quelqu’un d’autre, ' +
+              'pour qu’il soit mentionné quand il lance une partie',
             '**/unregister** — retire un compte du suivi'
           ].join('\n')
         },

@@ -26,8 +26,8 @@ Bot Discord qui suit les parties classées **League of Legends** (et **TFT**, op
 
 | Commande | Description |
 |---|---|
-| `/register <riot-id> [serveur]` | Enregistre un compte (`Faker#KR1`). Jusqu'à 8 comptes par membre. |
-| `/unregister <compte>` | Retire un compte du suivi (autocomplétion sur tes propres comptes). |
+| `/register <riot-id> [membre] [serveur]` | Enregistre un compte (`Faker#KR1`). Avec `membre`, le compte est lié à **quelqu'un d'autre** : c'est lui qui sera mentionné. Jusqu'à 8 comptes par membre. |
+| `/unregister <compte>` | Retire un compte du suivi (autocomplétion sur les comptes que tu peux retirer). |
 | `/profile [membre] [public]` | Rangs, LP et winrate des comptes suivis. |
 | `/history [membre] [nombre] [public]` | Les dernières parties suivies, avec LP et KDA. |
 | `/leaderboard [type]` | Classement du serveur : par rang (Solo/Duo, Flex) ou par LP gagnés (24 h, 7 j, 30 j). |
@@ -37,6 +37,18 @@ Bot Discord qui suit les parties classées **League of Legends** (et **TFT**, op
 | `/help` | Aide intégrée. |
 
 Les commandes de consultation répondent en privé par défaut ; ajoute `public: true` pour partager la réponse dans le salon.
+
+### Enregistrer le compte d'un autre membre
+
+`/register Pote#EUW membre:@Pote` lie le compte à `@Pote` : c'est **lui** qui sera mentionné à chaque annonce, pas celui qui a lancé la commande.
+
+Trois garde-fous, pour que personne ne se retrouve tagué à son insu :
+
+- la confirmation est **publique** et mentionne la personne concernée, au lieu d'être discrète ;
+- **elle peut la retirer elle-même** avec `/unregister`, sans passer par un administrateur ;
+- **celui qui a fait l'ajout peut aussi le défaire**, ce qui règle le cas du mauvais Riot ID.
+
+Le quota de 8 comptes s'applique au propriétaire du compte, pas à celui qui l'ajoute. `/profile` indique « lié par @… » quand un compte n'a pas été ajouté par son propriétaire.
 
 ---
 
@@ -138,7 +150,7 @@ Quelques partis pris qui expliquent le reste :
 
 | Table | Contenu |
 |---|---|
-| `accounts` | Comptes Riot enregistrés, un PUUID ne peut être suivi qu'une fois. |
+| `accounts` | Comptes Riot enregistrés, un PUUID ne peut être suivi qu'une fois. `registered_by` retient qui a lancé la commande. |
 | `tracked_games` | Une ligne par joueur et par partie : état, rang avant/après, statistiques finales. |
 | `league_snapshots` | Photos du classement, écrites uniquement en cas de changement. |
 | `tracked_tft_games`, `tft_league_snapshots` | Équivalents TFT. |
@@ -155,7 +167,7 @@ Les migrations sont versionnées et jouées automatiquement au démarrage, chacu
 yarn test
 ```
 
-62 tests couvrent l'arithmétique des rangs (promotions, rétrogradations, tiers apex), les dépôts SQLite (unicité, cascade, agrégations), le limiteur de débit (fenêtres, 429, limites par méthode), l'endpoint de santé et la génération des embeds — y compris le respect des limites de taille imposées par Discord.
+67 tests couvrent l'arithmétique des rangs (promotions, rétrogradations, tiers apex), les dépôts SQLite (unicité, cascade, agrégations, comptes liés pour autrui), le limiteur de débit (fenêtres, 429, limites par méthode), l'endpoint de santé et la génération des embeds — y compris le respect des limites de taille imposées par Discord.
 
 ---
 

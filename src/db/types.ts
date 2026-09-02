@@ -7,6 +7,8 @@ export interface Account {
   tagLine: string;
   puuid: string;
   platform: string;
+  /** Discord user who ran /register; equals discordUserId for self-registration. */
+  registeredBy: string;
   createdAt: number;
 }
 

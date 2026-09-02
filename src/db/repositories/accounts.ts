@@ -9,6 +9,7 @@ interface AccountRow {
   tag_line: string;
   puuid: string;
   platform: string;
+  registered_by: string | null;
   created_at: number;
 }
 
@@ -20,6 +21,7 @@ function toAccount(row: AccountRow): Account {
     tagLine: row.tag_line,
     puuid: row.puuid,
     platform: row.platform,
+    registeredBy: row.registered_by ?? row.discord_user_id,
     createdAt: row.created_at
   };
 }
@@ -41,8 +43,8 @@ function stmts() {
   const db = getDatabase();
   statements = {
     insert: db.prepare(
-      `INSERT INTO accounts (discord_user_id, game_name, tag_line, puuid, platform, created_at)
-       VALUES (@discordUserId, @gameName, @tagLine, @puuid, @platform, @createdAt)`
+      `INSERT INTO accounts (discord_user_id, game_name, tag_line, puuid, platform, registered_by, created_at)
+       VALUES (@discordUserId, @gameName, @tagLine, @puuid, @platform, @registeredBy, @createdAt)`
     ),
     deleteById: db.prepare('DELETE FROM accounts WHERE id = ?'),
     byDiscordUser: db.prepare('SELECT * FROM accounts WHERE discord_user_id = ? ORDER BY created_at ASC'),
@@ -60,16 +62,23 @@ export type AddAccountResult =
   | { ok: false; reason: 'already_registered'; account: Account };
 
 export function addAccount(input: {
+  /** The member the account belongs to — the one who gets mentioned. */
   discordUserId: string;
   gameName: string;
   tagLine: string;
   puuid: string;
   platform: string;
+  /** Who ran the command; defaults to the owner for self-registration. */
+  registeredBy?: string;
 }): AddAccountResult {
   const existing = findByPuuid(input.puuid);
   if (existing) return { ok: false, reason: 'already_registered', account: existing };
 
-  const info = stmts().insert.run({ ...input, createdAt: Date.now() });
+  const info = stmts().insert.run({
+    ...input,
+    registeredBy: input.registeredBy ?? input.discordUserId,
+    createdAt: Date.now()
+  });
   const account = findById(Number(info.lastInsertRowid));
   if (!account) throw new Error('Compte inséré mais introuvable — état de base incohérent');
   return { ok: true, account };
@@ -91,6 +100,27 @@ export function findByPuuid(puuid: string): Account | null {
 
 export function findByDiscordUser(discordUserId: string): Account[] {
   return (stmts().byDiscordUser.all(discordUserId) as AccountRow[]).map(toAccount);
+}
+
+/**
+ * Accounts a member linked to someone else. They can undo their own mistake
+ * without needing an administrator.
+ */
+export function findRegisteredForOthers(registrarId: string): Account[] {
+  return (
+    getDatabase()
+      .prepare(
+        `SELECT * FROM accounts
+         WHERE registered_by = ? AND discord_user_id <> ?
+         ORDER BY created_at ASC`
+      )
+      .all(registrarId, registrarId) as AccountRow[]
+  ).map(toAccount);
+}
+
+/** Every account the member may remove: their own, plus the ones they linked. */
+export function findManageableBy(discordUserId: string): Account[] {
+  return [...findByDiscordUser(discordUserId), ...findRegisteredForOthers(discordUserId)];
 }
 
 export function listAccounts(): Account[] {

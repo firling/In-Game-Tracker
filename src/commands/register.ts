@@ -26,6 +26,11 @@ export const registerCommand: BotCommand = {
         .setRequired(true)
         .setMaxLength(50)
     )
+    .addUserOption((option) =>
+      option
+        .setName('membre')
+        .setDescription('Lier le compte à ce membre plutôt qu’à toi — il sera mentionné à chaque partie')
+    )
     .addStringOption((option) =>
       option
         .setName('serveur')
@@ -41,7 +46,20 @@ export const registerCommand: BotCommand = {
     ),
 
   async execute(interaction, context) {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const owner = interaction.options.getUser('membre') ?? interaction.user;
+    const onBehalf = owner.id !== interaction.user.id;
+
+    if (owner.bot) {
+      await interaction.reply({
+        embeds: [errorEmbed('Membre invalide', 'Impossible de lier un compte à un bot.')],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    // Linking on someone else's behalf is announced publicly: the person
+    // concerned must be able to see it and undo it.
+    await interaction.deferReply(onBehalf ? {} : { flags: MessageFlags.Ephemeral });
 
     const raw = interaction.options.getString('riot-id', true).trim();
     const parsed = parseRiotId(raw);
@@ -61,12 +79,15 @@ export const registerCommand: BotCommand = {
     const platform =
       requestedPlatform && isPlatform(requestedPlatform) ? requestedPlatform : context.config.riot.platform;
 
-    if (accountsRepo.countForUser(interaction.user.id) >= MAX_ACCOUNTS_PER_USER) {
+    // The quota belongs to the account owner, not to whoever runs the command.
+    if (accountsRepo.countForUser(owner.id) >= MAX_ACCOUNTS_PER_USER) {
       await interaction.editReply({
         embeds: [
           errorEmbed(
             'Limite atteinte',
-            `Tu suis déjà ${MAX_ACCOUNTS_PER_USER} comptes. Retires-en un avec **/unregister** avant d’en ajouter un autre.`
+            onBehalf
+              ? `${owner} suit déjà ${MAX_ACCOUNTS_PER_USER} comptes. Il faut en retirer un avec **/unregister** avant d’en ajouter un autre.`
+              : `Tu suis déjà ${MAX_ACCOUNTS_PER_USER} comptes. Retires-en un avec **/unregister** avant d’en ajouter un autre.`
           )
         ]
       });
@@ -89,22 +110,26 @@ export const registerCommand: BotCommand = {
       }
 
       const result = accountsRepo.addAccount({
-        discordUserId: interaction.user.id,
+        discordUserId: owner.id,
         gameName: account.gameName,
         tagLine: account.tagLine,
         puuid: account.puuid,
-        platform
+        platform,
+        registeredBy: interaction.user.id
       });
 
       if (!result.ok) {
-        const owner = result.account.discordUserId;
+        const currentOwner = result.account.discordUserId;
         await interaction.editReply({
           embeds: [
             errorEmbed(
               'Compte déjà suivi',
-              owner === interaction.user.id
-                ? `**${riotId(account.gameName, account.tagLine)}** est déjà enregistré sur ton compte Discord.`
-                : `**${riotId(account.gameName, account.tagLine)}** est déjà suivi par <@${owner}>.`
+              currentOwner === owner.id
+                ? owner.id === interaction.user.id
+                  ? `**${riotId(account.gameName, account.tagLine)}** est déjà enregistré sur ton compte Discord.`
+                  : `**${riotId(account.gameName, account.tagLine)}** est déjà lié à <@${currentOwner}>.`
+                : `**${riotId(account.gameName, account.tagLine)}** est déjà suivi par <@${currentOwner}>.` +
+                  `\nS’il s’agit d’une erreur, cette personne peut le retirer avec **/unregister**.`
             )
           ]
         });
@@ -115,28 +140,41 @@ export const registerCommand: BotCommand = {
       const solo = entries.find((entry) => entry.queueType === 'RANKED_SOLO_5x5') ?? null;
       const flex = entries.find((entry) => entry.queueType === 'RANKED_FLEX_SR') ?? null;
 
+      const description = onBehalf
+        ? `${owner} est maintenant suivi et sera mentionné à chaque partie classée.\n` +
+          `Ajouté par ${interaction.user}. Si ce n’est pas le bon compte, ${owner} ou ${interaction.user} ` +
+          `peuvent le retirer avec **/unregister**.\n` +
+          `[Voir sur op.gg](${opggUrl(account.gameName, account.tagLine, platform)})`
+        : `Le suivi est actif. Tes parties classées **Solo/Duo** et **Flex** seront annoncées automatiquement.\n` +
+          `[Voir sur op.gg](${opggUrl(account.gameName, account.tagLine, platform)})`;
+
       const embed = new EmbedBuilder()
         .setColor(solo ? tierColor(solo.tier) : COLORS.victory)
-        .setAuthor({ name: 'Compte enregistré', iconURL: tierEmblemUrl(solo?.tier) })
+        .setAuthor({
+          name: onBehalf ? `Compte lié à ${owner.displayName ?? owner.username}` : 'Compte enregistré',
+          iconURL: onBehalf ? owner.displayAvatarURL() : tierEmblemUrl(solo?.tier)
+        })
         .setTitle(riotId(account.gameName, account.tagLine))
-        .setDescription(
-          `Le suivi est actif. Tes parties classées **Solo/Duo** et **Flex** seront annoncées automatiquement.\n` +
-            `[Voir sur op.gg](${opggUrl(account.gameName, account.tagLine, platform)})`
-        )
+        .setDescription(description)
         .addFields(
           { name: '👤 Solo/Duo', value: rankSummary(solo), inline: true },
           { name: '👥 Flex', value: rankSummary(flex), inline: true },
           { name: '🌍 Serveur', value: platform.toUpperCase(), inline: true }
         )
         .setThumbnail(tierEmblemUrl(solo?.tier))
-        .setFooter({ text: 'Astuce : /profile pour tes stats, /leaderboard pour le classement du serveur' })
+        .setFooter({
+          text: onBehalf
+            ? 'Astuce : /profile @membre pour ses stats, /leaderboard pour le classement du serveur'
+            : 'Astuce : /profile pour tes stats, /leaderboard pour le classement du serveur'
+        })
         .setTimestamp();
 
       await interaction.editReply({
+        content: onBehalf ? `${owner}` : undefined,
         embeds: [embed],
         components: profileButtons({
           accountId: result.account.id,
-          discordUserId: interaction.user.id,
+          discordUserId: owner.id,
           gameName: account.gameName,
           tagLine: account.tagLine,
           platform
@@ -144,7 +182,9 @@ export const registerCommand: BotCommand = {
       });
 
       log.info('Compte enregistré', {
-        discordUserId: interaction.user.id,
+        proprietaire: owner.id,
+        parQui: interaction.user.id,
+        pourAutrui: onBehalf,
         account: riotId(account.gameName, account.tagLine),
         platform
       });
