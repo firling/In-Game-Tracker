@@ -102,13 +102,17 @@ export class LeagueApi {
     });
   }
 
-  async getMatchIds(puuid: string, options: { count?: number; queue?: number } = {}): Promise<string[]> {
+  /** `startTime` is a Unix timestamp in seconds, as Riot expects it. */
+  async getMatchIds(
+    puuid: string,
+    options: { count?: number; queue?: number; startTime?: number } = {}
+  ): Promise<string[]> {
     return (
       (await this.http.request<string[]>({
         method: 'match-v5.ids-by-puuid',
         host: this.regionHost,
         path: `/lol/match/v5/matches/by-puuid/${puuid}/ids`,
-        params: { start: 0, count: options.count ?? 5, queue: options.queue },
+        params: { start: 0, count: options.count ?? 5, queue: options.queue, startTime: options.startTime },
         allow404: true
       })) ?? []
     );

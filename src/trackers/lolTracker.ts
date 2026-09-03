@@ -2,7 +2,7 @@ import { groupBy, mapWithConcurrency, sleep } from '../core/async';
 import { createLogger } from '../core/logger';
 import * as accountsRepo from '../db/repositories/accounts';
 import * as gamesRepo from '../db/repositories/games';
-import { saveSnapshot } from '../db/repositories/snapshots';
+import { latestSnapshot, saveSnapshot } from '../db/repositories/snapshots';
 import type { Account, TrackedGame } from '../db/types';
 import { rankDelta } from '../domain/rank';
 import { queueNameFor, queueTypeFor, TRACKED_QUEUES } from '../riot/constants';
@@ -11,7 +11,13 @@ import type { LeagueApi } from '../riot/leagueApi';
 import type { LeagueEntryDto, MatchDto } from '../riot/types';
 import { liveGameButtons, matchButtons } from '../ui/components';
 import { gameEndEmbed, gameStartEmbed } from '../ui/embeds/game';
-import type { FinishedGameView, FinishedPlayerView, LiveGameView, PlayerRef } from '../ui/viewModels';
+import type {
+  FinishedGameView,
+  FinishedPlayerView,
+  LiveGameView,
+  PlayerRef,
+  RankSnapshotView
+} from '../ui/viewModels';
 import type { Notifier } from '../services/notifier';
 
 const log = createLogger('tracker:lol');
@@ -23,6 +29,21 @@ const RANK_SETTLE_DELAY_MS = 4000;
 
 const SPECTATOR_CONCURRENCY = 4;
 const MATCH_CONCURRENCY = 3;
+
+/**
+ * The match-history sweep only needs to be timely enough for an end-of-game
+ * result, so it runs every few cycles rather than every one — it costs one
+ * request per account and per tracked queue.
+ */
+const HISTORY_SWEEP_EVERY_CYCLES = 3;
+const HISTORY_MATCH_COUNT = 5;
+const HISTORY_CONCURRENCY = 2;
+/** How far back the sweep looks, so a long downtime never floods the channel. */
+const HISTORY_LOOKBACK_MS = 3 * 60 * 60 * 1000;
+/** Beyond this, the last rank snapshot is too old to be a credible "before". */
+const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+/** Minimum delay between two warnings about the same failing account. */
+const ERROR_WARN_INTERVAL_MS = 10 * 60 * 1000;
 
 export interface LolTrackerOptions {
   intervalMs: number;
@@ -41,6 +62,10 @@ export class LolTracker {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private stopped = false;
+  private cycles = 0;
+  /** Games that ended before this are backfilled quietly, never announced. */
+  private startedAt = 0;
+  private readonly lastWarnedAt = new Map<string, number>();
 
   constructor(
     private readonly api: LeagueApi,
@@ -50,6 +75,7 @@ export class LolTracker {
 
   start(): void {
     this.stopped = false;
+    this.startedAt = Date.now();
     log.info('Démarrage du suivi LoL', { intervalSeconds: this.options.intervalMs / 1000 });
     void this.runCycle();
   }
@@ -74,6 +100,8 @@ export class LolTracker {
     try {
       await this.detectStartedGames();
       await this.detectFinishedGames();
+      if (this.cycles % HISTORY_SWEEP_EVERY_CYCLES === 0) await this.sweepMatchHistory();
+      this.cycles += 1;
 
       const abandoned = gamesRepo.abandonStaleGames(Date.now() - this.options.gameTimeoutMs);
       if (abandoned > 0) log.warn(`${abandoned} partie(s) jamais résolue(s) abandonnée(s)`);
@@ -355,6 +383,191 @@ export class LolTracker {
     for (const completion of completions) gamesRepo.completeGame(completion);
   }
 
+  /* ------------------------------------------------------------- history -- */
+
+  /**
+   * Announces finished games the spectator endpoint never showed us.
+   *
+   * `recordActiveGame` is blind to any account Riot hides from spectator-v5 —
+   * streamer mode removes a player from it entirely — and to any game played
+   * while the bot was down. The match history always has those games, so the
+   * result gets announced even when the start never could be.
+   */
+  private async sweepMatchHistory(): Promise<void> {
+    const accounts = accountsRepo.listAccounts().slice(0, this.options.maxAccountsPerCycle);
+    if (accounts.length === 0) return;
+
+    const since = Math.floor((Date.now() - HISTORY_LOOKBACK_MS) / 1000);
+    const found = await mapWithConcurrency(accounts, HISTORY_CONCURRENCY, async (account) => {
+      const known = gamesRepo.knownMatchIds(account.id);
+      const matchIds: string[] = [];
+      // One request per queue: Riot filters on a single queue at a time, and
+      // asking per queue avoids fetching normals only to discard them.
+      for (const queueId of TRACKED_QUEUES) {
+        const ids = await this.api.getMatchIds(account.puuid, {
+          count: HISTORY_MATCH_COUNT,
+          queue: queueId,
+          startTime: since
+        });
+        for (const id of ids) if (!known.has(id)) matchIds.push(id);
+      }
+      return { account, matchIds };
+    });
+
+    // Group by match so a game shared by several tracked players is fetched and
+    // announced once, exactly as the spectator path does.
+    const byMatch = new Map<string, Account[]>();
+    for (let index = 0; index < found.length; index += 1) {
+      const result = found[index];
+      if (result.status === 'rejected') {
+        this.logRiotError('Lecture de l’historique impossible', accounts[index], result.reason);
+        continue;
+      }
+      for (const matchId of result.value.matchIds) {
+        const bucket = byMatch.get(matchId);
+        if (bucket) bucket.push(result.value.account);
+        else byMatch.set(matchId, [result.value.account]);
+      }
+    }
+
+    for (const [matchId, involved] of byMatch) {
+      try {
+        const match = await this.api.getMatch(matchId);
+        if (match) await this.announceHistoricalGame(matchId, match, involved);
+      } catch (error) {
+        log.debug('Match d’historique illisible', { matchId, error: String(error) });
+      }
+    }
+  }
+
+  private async announceHistoricalGame(
+    matchId: string,
+    match: MatchDto,
+    accounts: Account[]
+  ): Promise<void> {
+    const queueType = queueTypeFor(match.info.queueId);
+    const durationSeconds = match.info.gameDuration;
+    const startedAt = match.info.gameStartTimestamp;
+    const endedAt = match.info.gameEndTimestamp ?? startedAt + durationSeconds * 1000;
+
+    const entries: FinishedPlayerView[] = [];
+    const completions: gamesRepo.CompleteGameInput[] = [];
+
+    for (const account of accounts) {
+      const participant = match.info.participants.find((p) => p.puuid === account.puuid);
+      if (!participant) continue;
+
+      this.syncRiotId(account, participant.riotIdGameName, participant.riotIdTagline);
+
+      const rankBefore = queueType ? this.rankBeforeSnapshot(account.id, queueType, endedAt) : null;
+      const claimed = gamesRepo.startFinishedGame({
+        accountId: account.id,
+        matchId,
+        queueId: match.info.queueId,
+        championId: participant.championId,
+        startedAt,
+        tierBefore: rankBefore?.tier ?? null,
+        rankBefore: rankBefore?.rank ?? null,
+        lpBefore: rankBefore?.leaguePoints ?? null
+      });
+      // The spectator path already owns this game, and its announcement.
+      if (!claimed) continue;
+
+      const rankAfter = queueType ? await this.safeRank(account.puuid, queueType, true) : null;
+      const delta = rankBefore && rankAfter ? rankDelta(rankBefore, rankAfter) : null;
+
+      entries.push({ player: toPlayerRef(account), participant, rankAfter, rankBefore, delta });
+
+      if (rankAfter && queueType) {
+        saveSnapshot({
+          accountId: account.id,
+          queueType,
+          tier: rankAfter.tier,
+          rank: rankAfter.rank,
+          leaguePoints: rankAfter.leaguePoints,
+          wins: rankAfter.wins,
+          losses: rankAfter.losses
+        });
+      }
+
+      completions.push({
+        accountId: account.id,
+        matchId,
+        endedAt,
+        tierAfter: rankAfter?.tier ?? null,
+        rankAfter: rankAfter?.rank ?? null,
+        lpAfter: rankAfter?.leaguePoints ?? null,
+        lpChange: delta?.lp ?? null,
+        win: participant.win,
+        championName: participant.championName,
+        championId: participant.championId,
+        kills: participant.kills,
+        deaths: participant.deaths,
+        assists: participant.assists,
+        cs: participant.totalMinionsKilled + (participant.neutralMinionsKilled ?? 0),
+        durationSeconds
+      });
+    }
+
+    for (const completion of completions) gamesRepo.completeGame(completion);
+    if (entries.length === 0) return;
+
+    // Backfilled quietly: these still feed /history, /recap and the LP baseline,
+    // but nobody wants a burst of stale results in the channel after a deploy.
+    if (endedAt < this.startedAt) {
+      log.info('Partie récupérée dans l’historique (antérieure au démarrage, non annoncée)', {
+        matchId,
+        joueurs: entries.length
+      });
+      return;
+    }
+
+    const remake =
+      durationSeconds < REMAKE_THRESHOLD_SECONDS ||
+      entries.some((entry) => entry.participant.gameEndedInEarlySurrender);
+
+    const view: FinishedGameView = {
+      matchId,
+      queueId: match.info.queueId,
+      queueName: queueNameFor(match.info.queueId),
+      durationSeconds,
+      endedAt,
+      remake,
+      players: entries
+    };
+
+    const sent = await this.notifier.send(
+      gameEndEmbed(view),
+      matchButtons(
+        entries.map((entry) => entry.player),
+        matchId
+      )
+    );
+    if (!sent) log.warn('Annonce de fin (historique) non envoyée', { matchId });
+
+    log.info('Partie terminée annoncée depuis l’historique', {
+      matchId,
+      joueurs: entries.length,
+      resultat: remake ? 'remake' : entries[0].participant.win ? 'victoire' : 'défaite'
+    });
+  }
+
+  /**
+   * The rank captured after the player's previous game, used as the "before"
+   * for this one. A stale snapshot would produce a nonsense LP delta, so an old
+   * one is dropped and the result is shown without a delta rather than a wrong one.
+   */
+  private rankBeforeSnapshot(
+    accountId: number,
+    queueType: string,
+    endedAt: number
+  ): RankSnapshotView | null {
+    const snapshot = latestSnapshot(accountId, queueType);
+    if (!snapshot) return null;
+    if (snapshot.capturedAt > endedAt || endedAt - snapshot.capturedAt > SNAPSHOT_MAX_AGE_MS) return null;
+    return { tier: snapshot.tier, rank: snapshot.rank, leaguePoints: snapshot.leaguePoints };
+  }
+
   /* ------------------------------------------------------------- helpers -- */
 
   private async safeRank(puuid: string, queueType: string, fresh = false): Promise<LeagueEntryDto | null> {
@@ -377,10 +590,24 @@ export class LolTracker {
     });
   }
 
+  /**
+   * A failure here is never fatal, but it must not be invisible either: an
+   * account the tracker can no longer read looks exactly like an account that
+   * simply is not playing. Warn once in a while per account, debug in between,
+   * so a lasting blind spot surfaces without a broken endpoint flooding the log.
+   */
   private logRiotError(message: string, account: Account, error: unknown): void {
     const context = { account: `${account.gameName}#${account.tagLine}` };
     if (error instanceof RiotApiError && (error.status === 401 || error.status === 403)) {
       log.error(`${message} — ${error.message}`, context);
+      return;
+    }
+
+    const key = `${account.id}:${message}`;
+    const now = Date.now();
+    if (now - (this.lastWarnedAt.get(key) ?? 0) > ERROR_WARN_INTERVAL_MS) {
+      this.lastWarnedAt.set(key, now);
+      log.warn(message, { ...context, error: String(error) });
       return;
     }
     log.debug(message, { ...context, error: String(error) });

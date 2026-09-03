@@ -83,6 +83,33 @@ export function startGame(input: StartGameInput): boolean {
   return info.changes > 0;
 }
 
+/**
+ * Records a game we only discovered once it was already over.
+ *
+ * The spectator endpoint never shows some games — Riot hides accounts in
+ * streamer mode from it entirely, and a game that runs while the bot is down is
+ * missed too. `notified_start` is set upfront so the tracker never announces
+ * the start of a game that has already ended.
+ */
+export function startFinishedGame(input: StartGameInput): boolean {
+  const info = getDatabase()
+    .prepare(
+      `INSERT OR IGNORE INTO tracked_games
+         (account_id, match_id, queue_id, champion_id, started_at, tier_before, rank_before, lp_before, status, notified_start)
+       VALUES (@accountId, @matchId, @queueId, @championId, @startedAt, @tierBefore, @rankBefore, @lpBefore, 'pending', 1)`
+    )
+    .run(input);
+  return info.changes > 0;
+}
+
+/** Every match already recorded for an account, whatever its status. */
+export function knownMatchIds(accountId: number): Set<string> {
+  const rows = getDatabase()
+    .prepare('SELECT match_id FROM tracked_games WHERE account_id = ?')
+    .all(accountId) as Array<{ match_id: string }>;
+  return new Set(rows.map((row) => row.match_id));
+}
+
 export function markStartNotified(matchIds: Array<{ accountId: number; matchId: string }>): void {
   const db = getDatabase();
   const update = db.prepare(
